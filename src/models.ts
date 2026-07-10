@@ -36,6 +36,17 @@ export interface GrokBuildModelDef {
 
 const ZERO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } as const;
 
+/** Shared wire defaults for official CLI proxy parity. */
+const CLI_PARITY_COMPAT: Record<string, unknown> = {
+	// Official Grok Build models use /v1/responses.
+	// Keep Responses-friendly reasoning defaults and explicit cache affinity.
+	// omp auto-sets x-grok-conv-id only for provider=xai / api.x.ai hosts.
+	// For provider=grok-build + cli-chat-proxy we must set it ourselves.
+	promptCacheSessionHeader: "x-grok-conv-id",
+	filterReasoningHistory: true,
+	includeEncryptedReasoning: false,
+};
+
 /** Curated overlays for known SKUs (headers/compat/context that /v1/models may omit). */
 interface CuratedOverlay {
 	name?: string;
@@ -56,10 +67,10 @@ const CURATED: Record<string, CuratedOverlay> = {
 		maxTokens: 64_000,
 		api: "openai-responses",
 		compat: {
+			...CLI_PARITY_COMPAT,
 			supportsReasoningEffort: true,
 			omitReasoningEffort: false,
 			supportsReasoningParams: true,
-			reasoningContentField: "reasoning_content",
 			reasoningEffortMap: { minimal: "low", xhigh: "high" },
 			requiresReasoningContentForToolCalls: false,
 		},
@@ -72,10 +83,10 @@ const CURATED: Record<string, CuratedOverlay> = {
 		maxTokens: 64_000,
 		api: "openai-responses",
 		compat: {
+			...CLI_PARITY_COMPAT,
 			supportsReasoningEffort: false,
 			omitReasoningEffort: true,
 			supportsReasoningParams: false,
-			reasoningContentField: "reasoning_content",
 			requiresReasoningContentForToolCalls: false,
 		},
 	},
@@ -86,6 +97,9 @@ const CURATED: Record<string, CuratedOverlay> = {
 		contextWindow: 200_000,
 		maxTokens: 64_000,
 		api: "openai-responses",
+		compat: {
+			...CLI_PARITY_COMPAT,
+		},
 	},
 };
 
@@ -111,6 +125,10 @@ function finalizeModelDef(id: string, curated: CuratedOverlay, live?: LiveModelR
 		mapApiBackend(live?.api_backend) ??
 		"openai-responses";
 	const input = curated.input ?? ["text"];
+	const compat = {
+		...CLI_PARITY_COMPAT,
+		...(curated.compat ?? {}),
+	};
 
 	return {
 		id,
@@ -124,7 +142,7 @@ function finalizeModelDef(id: string, curated: CuratedOverlay, live?: LiveModelR
 		headers: {
 			"x-grok-model-override": id,
 		},
-		compat: curated.compat,
+		compat,
 		baseUrl: GROK_BUILD_BASE_URL,
 	};
 }

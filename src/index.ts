@@ -6,6 +6,12 @@
  * Registers provider `grok-build` against the official CLI proxy:
  *   https://cli-chat-proxy.grok.com/v1
  *
+ * Wire parity with official Grok Build CLI:
+ * - api: openai-responses  → POST /v1/responses
+ * - CLI auth headers
+ * - x-grok-model-override
+ * - promptCacheSessionHeader: x-grok-conv-id
+ *
  * Compared with stock `xai-oauth` (api.x.ai / SuperGrok API path):
  * - native /login for Grok Build
  * - credentials stored under `grok-build`
