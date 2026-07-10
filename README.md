@@ -1,61 +1,64 @@
-# omp-grok-build
+# ⚡ omp-grok-build
 
-Oh My Pi extension that adds a **first-class Grok Build CLI provider**:
+<div align="center">
 
-- provider id: `grok-build`
-- endpoint: `https://cli-chat-proxy.grok.com/v1`
-- native `/login` (xAI device-code OAuth)
-- credentials stored as `grok-build` (not SuperGrok `xai-oauth`)
+**First-class [Grok Build](https://grok.com) CLI provider for [Oh My Pi](https://github.com/can1357/oh-my-pi)**
 
-This is the portable alternative to forking omp.
+Native `/login` · separate credentials · CLI proxy billing · no omp fork
+
+<br/>
+
+[![Oh My Pi](https://img.shields.io/badge/Oh%20My%20Pi-extension-7c3aed?style=for-the-badge)](https://github.com/can1357/oh-my-pi)
+[![License: MIT](https://img.shields.io/badge/License-MIT-22c55e?style=for-the-badge)](./LICENSE)
+[![GitHub](https://img.shields.io/badge/GitHub-ART1KZ%2Fomp--grok--build-111827?style=for-the-badge&logo=github)](https://github.com/ART1KZ/omp-grok-build)
+
+<br/>
+
+**Languages:** **English** · [Русский](./README.ru.md)
+
+</div>
 
 ---
 
-## Why this exists
+## ✨ Why this exists
 
-People confuse two different things:
+People mix up **two different product surfaces**:
 
-| | SuperGrok path | Grok Build path |
+| | 🟣 SuperGrok path | 🟢 Grok Build path |
 |---|---|---|
-| omp provider | `xai-oauth` (built-in) | `grok-build` (this extension) |
-| endpoint | `https://api.x.ai/v1` | `https://cli-chat-proxy.grok.com/v1` |
-| auth store | `xai-oauth` | `grok-build` |
-| headers | normal API bearer | `X-XAI-Token-Auth: xai-grok-cli` + model override |
-| billing | SuperGrok / X Premium+ quota | Build/CLI usage window |
-| example model | `xai-oauth/grok-build` | `grok-build/grok-4.5` |
+| **omp provider** | `xai-oauth` *(built-in)* | `grok-build` *(this extension)* |
+| **endpoint** | `https://api.x.ai/v1` | `https://cli-chat-proxy.grok.com/v1` |
+| **auth store** | `xai-oauth` | `grok-build` |
+| **headers** | normal API bearer | `X-XAI-Token-Auth: xai-grok-cli` + model override |
+| **billing** | SuperGrok / X Premium+ quota | Build / CLI usage window |
+| **example model** | `xai-oauth/grok-build` | `grok-build/grok-4.5` |
 
-Selecting model id `grok-build` under `xai-oauth` is **not** the Grok Build product.
-It is still SuperGrok auth + SuperGrok billing.
+> ⚠️ Selecting model id `grok-build` under `xai-oauth` is **not** the Grok Build product.  
+> It is still SuperGrok auth + SuperGrok billing.
 
-This extension implements the real CLI product surface that the official `grok` binary uses.
+This extension implements the **real CLI surface** used by the official `grok` binary — as a portable omp plugin.
 
 ---
 
-## Install (any machine)
+## 🚀 Quick start
 
-### A) From GitHub (recommended)
+### 1️⃣ Install
 
 ```bash
 omp plugin install github:ART1KZ/omp-grok-build
 ```
 
-Restart omp (or open a new session).
+<details>
+<summary>Alternative installs</summary>
 
-### B) Link a local clone (dev / private)
+**Link a local clone (dev)**
 
 ```bash
 git clone https://github.com/ART1KZ/omp-grok-build.git
 omp plugin link ./omp-grok-build
 ```
 
-### C) Drop-in extension path
-
-```bash
-# user extensions dir
-mkdir -p ~/.omp/agent/extensions
-cp -r src ~/.omp/agent/extensions/omp-grok-build
-# or point config at the entry file:
-```
+**Drop-in extension path**
 
 ```yaml
 # ~/.omp/agent/config.yml
@@ -63,39 +66,56 @@ extensions:
   - ~/code/omp-grok-build/src/index.ts
 ```
 
-> Marketplace installs do **not** load extension modules. Use `omp plugin install` / `plugin link` / `extensions:` / `~/.omp/agent/extensions`.
+> Marketplace installs do **not** load extension modules.  
+> Use `omp plugin install` / `plugin link` / `extensions:` / `~/.omp/agent/extensions`.
 
----
+</details>
 
-## Use
+### 2️⃣ Login inside omp
 
 ```text
 /login
 → Grok Build (CLI proxy)
+```
 
+### 3️⃣ Pick a model
+
+```text
 /model grok-build/grok-4.5
 ```
 
-Optional help command:
+That’s it. No fork. No token scripts. No hand-written `models.yml` required.
 
-```text
-/grok-build-help
-```
+---
 
-### Login UI note
+## 🎯 Features
 
-In an interactive omp session, `/login` includes **Grok Build (CLI proxy)** after this extension loads.
+- ✅ **Real provider**, not `models.yml` glue
+- ✅ Native **`/login`** (xAI device-code OAuth)
+- ✅ Credentials stored as **`grok-build`** (separate from SuperGrok)
+- ✅ Auto token **refresh** via omp AuthStorage
+- ✅ Hybrid model catalog: **static seed + live `/v1/models`**
+- ✅ Correct CLI headers (`X-XAI-Token-Auth`, model override, client surface)
+- ✅ Works on **any machine** with one install command
+- ✅ Survives omp updates (plugin lives outside the binary)
 
-Headless `omp auth-broker list` only prints built-in registry providers and may **not** show extension OAuth providers. That is expected: extension registration happens when the session/extensions path loads (same path as `omp models list`).
+---
 
-Use TUI `/login` after the plugin is installed.
+## 🧭 Use
 
-### Recommended omp config
+| Action | Command |
+|---|---|
+| Login | `/login` → **Grok Build (CLI proxy)** |
+| Select model | `/model grok-build/grok-4.5` |
+| Help | `/grok-build-help` |
+| Force model refresh | `omp models refresh` |
+
+### Recommended config
 
 ```yaml
 # ~/.omp/agent/config.yml
 disabledProviders:
-  - xai-oauth          # prevent accidental SuperGrok usage
+  - xai-oauth          # avoid accidental SuperGrok usage
 modelProviderOrder:
   - grok-build
 modelRoles:
@@ -104,30 +124,65 @@ modelRoles:
   slow: grok-build/grok-4.5
 ```
 
-You do **not** need a hand-written `models.yml` for this provider after the extension is installed.
-The extension registers models + headers itself.
-
-If you still have an old custom `providers.grok-build` block in `models.yml`, remove it to avoid double-definition confusion.
+If you still have an old custom `providers.grok-build` block in `models.yml`, remove it to avoid double definitions.
 
 ---
-## Model discovery (hybrid)
+
+## 🧠 Model discovery (hybrid)
 
 | State | Catalog source |
 |---|---|
-| logged out / no token | static seed (`grok-4.5`, `grok-build`, `grok-composer-2.5-fast`) |
-| after `/login` | live `GET /v1/models` + curated overlays + seed backfill |
-| later sessions | omp `models.db` cache (~**24h** TTL, authoritative) |
-| after TTL / refresh | re-fetch live list |
+| 🔒 logged out | static seed (`grok-4.5`, `grok-build`, `grok-composer-2.5-fast`) |
+| 🔓 after `/login` | live `GET /v1/models` + curated overlays + seed backfill |
+| 💾 later sessions | omp `models.db` cache (~**24h** TTL) |
+| 🔄 force refresh | `omp models refresh` |
 
 **Models are not frozen forever after first login.**  
-They stick for the omp discovery cache window (~24h), then refresh.  
-Which models appear also depends on your account tier / Grok Build product surface.
+They stick for the cache window (~24h), then refresh.  
+Account tier / product surface can change which models appear.
 
-Implementation detail: extension API treats `models` and `fetchDynamicModels` as exclusive. This package uses only `fetchDynamicModels` and returns the static seed when `apiKey` is missing.
+> Extension API treats `models` and `fetchDynamicModels` as exclusive.  
+> This package uses only `fetchDynamicModels` and returns the seed when unauthenticated.
 
 ---
 
-## What the extension registers
+## 🔐 Auth details
+
+| Item | Value |
+|---|---|
+| Issuer | `https://auth.x.ai` |
+| Client | public CLI client `b1a00492-…` |
+| Flow | RFC 8628 device code |
+| Scopes | includes `grok-cli:access`, `api:access` |
+| Storage | omp `agent.db` under provider `grok-build` |
+| Refresh | automatic via AuthStorage |
+
+Same OAuth client family as SuperGrok — **different product routing** because of:
+
+1. endpoint (`cli-chat-proxy.grok.com`)
+2. CLI headers
+3. separate credential provider id
+
+The official `grok` binary is **not required**.
+
+---
+
+## 🖥️ Multi-machine setup
+
+```bash
+# on any new machine
+omp plugin install github:ART1KZ/omp-grok-build
+omp
+# then inside omp:
+# /login → Grok Build (CLI proxy)
+# /model grok-build/grok-4.5
+```
+
+No omp fork. No copying scripts. No manual auth.json plumbing.
+
+---
+
+## 🧩 What gets registered
 
 ```ts
 pi.registerProvider("grok-build", {
@@ -142,72 +197,77 @@ pi.registerProvider("grok-build", {
   fetchDynamicModels: async (apiKey) => /* seed or live merge */,
   oauth: {
     name: "Grok Build (CLI proxy)",
-    login,          // device-code on auth.x.ai
+    login,          // device-code
     refreshToken,   // refresh_token grant
-    getApiKey,      // access token → bearer
+    getApiKey,      // access → bearer
   },
 });
 ```
-## Auth details
-
-- Issuer: `https://auth.x.ai`
-- Client id: `b1a00492-073a-47ea-816f-4c329264a828` (same public CLI client)
-- Flow: RFC 8628 device code (`/login` opens URL + shows user code)
-- Scopes include `grok-cli:access` and `api:access`
-- Tokens live in omp `agent.db` under provider `grok-build`
-- Refresh is automatic via omp AuthStorage
-
-Same OAuth client family as SuperGrok, **different product routing** because of endpoint + CLI headers + separate credential provider id.
-
-You can still use official `grok login` for the native CLI; this extension does not require the `grok` binary.
 
 ---
 
-## Multi-machine workflow
+## ❓ FAQ
 
-1. Install stock omp on the new machine
-2. `omp plugin install github:ART1KZ/omp-grok-build`
-3. `/login` → Grok Build
-4. `/model grok-build/grok-4.5`
+### Is this the same as `/model xai-oauth/grok-build`?
+**No.** That still uses SuperGrok auth/billing.  
+This extension uses the CLI proxy surface.
 
-No omp fork. No copying token scripts. No `models.yml` glue required.
+### Can I force-update models without waiting 24h?
+Yes:
+
+```bash
+omp models refresh
+```
+
+Same pattern as other omp providers (Antigravity, xAI OAuth, local engines, etc.).
+
+### Will an omp update remove the plugin?
+Usually **no**. Plugins live separately from the binary.  
+It can only break if omp changes the extension/`registerProvider` API.
+
+### Why not a full omp fork?
+Because this is one provider, not a whole distribution.  
+Forks rot. Extensions are the portable path.
 
 ---
 
-## Why not a full omp fork?
-
-- Grok Build support is one provider, not a whole distribution
-- forks rot against `dev` quickly
-- extensions/plugins are the intended portable path in omp
-- upstream PR for a product-specific CLI proxy is unlikely to be accepted into core
-
-If you ever want a custom binary distro, keep this extension as the feature and only package omp + plugin together.
-
----
-
-## Uninstall
+## 🗑️ Uninstall
 
 ```bash
 omp plugin uninstall omp-grok-build
-# or unlink if linked:
-# omp plugin uninstall <linked-name>
 ```
 
 Then `/logout` and remove `grok-build` credentials if desired.
 
 ---
 
-## Files
+## 📁 Project layout
 
 ```text
-src/index.ts            # extension entry: registerProvider + /login
-src/xai-device-oauth.ts # device-code login + refresh
-package.json            # omp.extensions manifest
-README.md               # this file
+omp-grok-build/
+├── src/
+│   ├── index.ts             # extension entry
+│   ├── models.ts            # hybrid catalog (seed + live)
+│   ├── constants.ts         # provider id / baseUrl / headers
+│   └── xai-device-oauth.ts  # device-code login + refresh
+├── README.md                # English
+├── README.ru.md             # Русский
+├── package.json             # omp.extensions manifest
+└── LICENSE
 ```
 
 ---
 
-## License
+## 📄 License
 
-MIT
+MIT © [ART1KZ](https://github.com/ART1KZ)
+
+---
+
+<div align="center">
+
+Made for people who want **Grok Build in omp**, not SuperGrok with a different model id.
+
+⭐ If this saves you a fork — star the repo.
+
+</div>
