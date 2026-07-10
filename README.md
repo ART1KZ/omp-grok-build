@@ -110,20 +110,36 @@ The extension registers models + headers itself.
 If you still have an old custom `providers.grok-build` block in `models.yml`, remove it to avoid double-definition confusion.
 
 ---
+## Model discovery (hybrid)
+
+| State | Catalog source |
+|---|---|
+| logged out / no token | static seed (`grok-4.5`, `grok-build`, `grok-composer-2.5-fast`) |
+| after `/login` | live `GET /v1/models` + curated overlays + seed backfill |
+| later sessions | omp `models.db` cache (~**24h** TTL, authoritative) |
+| after TTL / refresh | re-fetch live list |
+
+**Models are not frozen forever after first login.**  
+They stick for the omp discovery cache window (~24h), then refresh.  
+Which models appear also depends on your account tier / Grok Build product surface.
+
+Implementation detail: extension API treats `models` and `fetchDynamicModels` as exclusive. This package uses only `fetchDynamicModels` and returns the static seed when `apiKey` is missing.
+
+---
 
 ## What the extension registers
 
 ```ts
 pi.registerProvider("grok-build", {
   baseUrl: "https://cli-chat-proxy.grok.com/v1",
-  api: "openai-completions",
+  api: "openai-responses",
   authHeader: true,
   headers: {
     "X-XAI-Token-Auth": "xai-grok-cli",
     "x-grok-client-version": "0.2.93",
     "x-grok-client-surface": "grok-build",
   },
-  models: [grok-4.5, grok-build, grok-composer-2.5-fast],
+  fetchDynamicModels: async (apiKey) => /* seed or live merge */,
   oauth: {
     name: "Grok Build (CLI proxy)",
     login,          // device-code on auth.x.ai
@@ -132,11 +148,6 @@ pi.registerProvider("grok-build", {
   },
 });
 ```
-
-Per-model header `x-grok-model-override` is set because the CLI proxy routes primarily by that header.
-
----
-
 ## Auth details
 
 - Issuer: `https://auth.x.ai`
