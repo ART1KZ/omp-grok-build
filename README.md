@@ -104,9 +104,11 @@ Marketplace installs do not load extension modules. Use `omp plugin install`, `o
 | Action | Command |
 |---|---|
 | Sign in | `/login` → **Grok Build (CLI proxy)** |
+| Sign out | `/logout` → **Grok Build** |
 | Choose model | `/model grok-build/grok-4.5` |
 | Help | `/grok-build-help` |
 | Refresh model list | `omp models refresh` |
+
 
 ### Recommended config
 
@@ -123,6 +125,9 @@ modelRoles:
 ```
 
 No hand-written `models.yml` is required. The extension registers the provider, models, headers, and login flow itself.
+
+**Do not set `providers.grok-build.apiKey` in `models.yml`.** Config `apiKey` overrides OAuth and survives `/logout`, so Grok Build will still look logged in after logout.
+
 
 ---
 
@@ -159,9 +164,13 @@ The list is not permanent after first login. It refreshes on cache expiry or man
 | Flow | device-code OAuth |
 | Client | public Grok CLI client |
 | Storage | omp `agent.db` under `grok-build` |
+| Login | `/login` → Grok Build |
+| Logout | `/logout` → Grok Build (removes `agent.db` OAuth only) |
 | Refresh | automatic |
 
 The official `grok` binary is optional. Login works inside omp.
+
+`/logout` does **not** delete `~/.grok/auth.json` (official CLI login file). That is a separate client.
 
 Interactive `/login` shows the provider after the extension loads. Headless `omp auth-broker list` only enumerates built-in providers.
 
