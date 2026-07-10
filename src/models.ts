@@ -42,12 +42,13 @@ interface CuratedOverlay {
 }
 
 /**
- * Safe compat subset that models.yml/runtime registration already accept.
- * Avoid non-schema internal fields here.
+ * Safe compat for Grok Build CLI proxy.
+ * promptCacheSessionHeader makes omp inject:
+ *   x-grok-conv-id: <sessionId/promptCacheKey>
+ * on every request for this custom provider.
  */
 const CLI_PARITY_COMPAT: Record<string, unknown> = {
-	// Keep Responses-friendly reasoning defaults.
-	// Cache affinity is also forced via headers below.
+	promptCacheSessionHeader: "x-grok-conv-id",
 };
 
 const CURATED: Record<string, CuratedOverlay> = {
