@@ -1,0 +1,36 @@
+{
+  "name": "omp-grok-build",
+  "version": "0.1.0",
+  "description": "Oh My Pi extension: Grok Build CLI proxy provider with native /login (cli-chat-proxy.grok.com)",
+  "license": "MIT",
+  "type": "module",
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ART1KZ/omp-grok-build.git"
+  },
+  "keywords": [
+    "oh-my-pi",
+    "omp",
+    "extension",
+    "grok-build",
+    "xai",
+    "provider"
+  ],
+  "omp": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "peerDependencies": {
+    "@oh-my-pi/pi-coding-agent": "*"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
