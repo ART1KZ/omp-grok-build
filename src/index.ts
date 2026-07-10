@@ -50,18 +50,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * prefix+uuid ids (e.g. recap-<uuid>). We keep one stable id per omp session,
  * but reshape it to conv-<uuid> in case backend affinity prefers that form.
  */
-/**
- * Rewrite Responses body cache identity into CLI-style conv-<uuid>.
- *
- * omp injects prompt_cache_key from sessionId. Official Grok CLI evidence uses
- * prefix+uuid ids (e.g. recap-<uuid>). We keep one stable id per omp session,
- * but reshape it to conv-<uuid> in case backend affinity prefers that form.
- *
- * Note: x-grok-conv-id header is injected by omp from the same identity source
- * (sessionId/promptCacheKey) when compat.promptCacheSessionHeader is set. Body
- * rewrite below ensures the wire prompt_cache_key is CLI-shaped even if the
- * raw omp session string is not.
- */
 function rewriteProviderPayload(payload: unknown, sessionId: string | undefined): unknown {
 	if (!isRecord(payload)) return payload;
 
@@ -76,6 +64,12 @@ function rewriteProviderPayload(payload: unknown, sessionId: string | undefined)
 	next.prompt_cache_key = convId;
 	return next;
 }
+
+export default function ompGrokBuildExtension(pi: ExtensionAPI): void {
+	pi.setLabel("Grok Build (CLI proxy)");
+
+	pi.registerProvider(PROVIDER_ID, {
+		baseUrl: GROK_BUILD_BASE_URL,
 		api: "openai-responses",
 		authHeader: true,
 		headers: { ...GROK_BUILD_HEADERS },
@@ -108,9 +102,10 @@ function rewriteProviderPayload(payload: unknown, sessionId: string | undefined)
 		if (!model || model.provider !== PROVIDER_ID) {
 			return event.payload;
 		}
+		const sessionManager = ctx.sessionManager;
 		const sessionId =
-			typeof ctx.sessionManager?.getSessionId === "function"
-				? ctx.sessionManager.getSessionId()
+			sessionManager && typeof sessionManager.getSessionId === "function"
+				? sessionManager.getSessionId()
 				: undefined;
 		return rewriteProviderPayload(event.payload, sessionId);
 	});
