@@ -11,11 +11,7 @@
  * - CLI auth headers
  * - x-grok-model-override
  * - promptCacheSessionHeader: x-grok-conv-id
- *
- * Compared with stock `xai-oauth` (api.x.ai / SuperGrok API path):
- * - native /login for Grok Build
- * - credentials stored under `grok-build`
- * - CLI headers and Build/CLI limits
+ * - CLI-style conversation ids: conv-<uuid> (stable per omp session)
  *
  * Install:
  *   omp plugin install github:ART1KZ/omp-grok-build
@@ -31,6 +27,7 @@ import {
 	GROK_BUILD_HEADERS,
 	PROVIDER_ID,
 } from "./constants";
+import { toGrokBuildConvId } from "./conv-id";
 import { STATIC_SEED } from "./models";
 import {
 	loginGrokBuildOAuth,
@@ -42,18 +39,48 @@ function getApiKey(credentials: OAuthCredentials): string {
 	return credentials.access;
 }
 
-export default function ompGrokBuildExtension(pi: ExtensionAPI): void {
-	pi.setLabel("Grok Build (CLI proxy)");
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null;
+}
 
-	pi.registerProvider(PROVIDER_ID, {
-		baseUrl: GROK_BUILD_BASE_URL,
+/**
+ * Rewrite Responses body cache identity into CLI-style conv-<uuid>.
+ *
+ * omp injects prompt_cache_key from sessionId. Official Grok CLI evidence uses
+ * prefix+uuid ids (e.g. recap-<uuid>). We keep one stable id per omp session,
+ * but reshape it to conv-<uuid> in case backend affinity prefers that form.
+ */
+/**
+ * Rewrite Responses body cache identity into CLI-style conv-<uuid>.
+ *
+ * omp injects prompt_cache_key from sessionId. Official Grok CLI evidence uses
+ * prefix+uuid ids (e.g. recap-<uuid>). We keep one stable id per omp session,
+ * but reshape it to conv-<uuid> in case backend affinity prefers that form.
+ *
+ * Note: x-grok-conv-id header is injected by omp from the same identity source
+ * (sessionId/promptCacheKey) when compat.promptCacheSessionHeader is set. Body
+ * rewrite below ensures the wire prompt_cache_key is CLI-shaped even if the
+ * raw omp session string is not.
+ */
+function rewriteProviderPayload(payload: unknown, sessionId: string | undefined): unknown {
+	if (!isRecord(payload)) return payload;
+
+	const next: Record<string, unknown> = { ...payload };
+	const source =
+		(typeof next.prompt_cache_key === "string" && next.prompt_cache_key) ||
+		sessionId ||
+		undefined;
+	const convId = toGrokBuildConvId(source);
+	if (!convId) return payload;
+
+	next.prompt_cache_key = convId;
+	return next;
+}
 		api: "openai-responses",
 		authHeader: true,
 		headers: { ...GROK_BUILD_HEADERS },
 		// Static seed keeps models visible before/without auth.
 		// Official CLI wire: /v1/responses + CLI headers + x-grok-conv-id affinity.
-		// omp treats `models` and `fetchDynamicModels` exclusively; seed is used
-		// for reliability and boot visibility.
 		models: STATIC_SEED.map(model => ({
 			id: model.id,
 			name: model.name,
@@ -75,6 +102,19 @@ export default function ompGrokBuildExtension(pi: ExtensionAPI): void {
 		},
 	});
 
+	// Reshape cache identity to CLI-like conv-<uuid> for Grok Build requests.
+	pi.on("before_provider_request", async (event, ctx) => {
+		const model = ctx.model;
+		if (!model || model.provider !== PROVIDER_ID) {
+			return event.payload;
+		}
+		const sessionId =
+			typeof ctx.sessionManager?.getSessionId === "function"
+				? ctx.sessionManager.getSessionId()
+				: undefined;
+		return rewriteProviderPayload(event.payload, sessionId);
+	});
+
 	pi.registerCommand("grok-build-help", {
 		description: "Grok Build provider help",
 		handler: async (_args, ctx) => {
@@ -86,6 +126,7 @@ export default function ompGrokBuildExtension(pi: ExtensionAPI): void {
 					"  /model grok-build/grok-4.5",
 					"",
 					"Route: cli-chat-proxy.grok.com /v1/responses",
+					"Conv:  stable conv-<uuid> per omp session",
 					"Not:   xai-oauth / api.x.ai (SuperGrok API path)",
 				].join("\n"),
 				"info",

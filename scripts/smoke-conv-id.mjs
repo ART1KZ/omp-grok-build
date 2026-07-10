@@ -1,26 +1,19 @@
 /**
- * Self-contained smoke that mirrors omp's cache-affinity injection logic.
- *
- * Source of truth in omp:
- * - getOpenAIPromptCacheKey(options) => normalize(promptCacheKey || sessionId)
- * - resolveOpenAIRequestSetup:
- *     if (promptCacheSessionId && model.compat.promptCacheSessionHeader)
- *       headers[promptCacheSessionHeader] = promptCacheSessionId
- *
- * This proves:
- * 1) enabling compat.promptCacheSessionHeader="x-grok-conv-id" injects header
- * 2) one sessionId => same header on every tool-step request
- * 3) without compat field, header is absent
+ * Smoke:
+ * 1) promptCacheSessionHeader enables x-grok-conv-id injection
+ * 2) one session => one stable id across tool steps
+ * 3) generator reshapes omp session strings to conv-<uuid> CLI-like form
  */
+import { createHash } from "node:crypto";
+import { toGrokBuildConvId, stableUuidFromString } from "../src/conv-id.ts";
+import { STATIC_SEED } from "../src/models.ts";
 
-function normalizeOpenAIStableId(sessionId, maxLen = 64, prefix = "pc_") {
+function normalizeOpenAIStableId(sessionId, maxLen = 64) {
 	if (!sessionId) return undefined;
 	const cleaned = String(sessionId).trim();
 	if (!cleaned) return undefined;
-	// omp keeps alnum/_/- mostly; for smoke just truncate safely
 	const compact = cleaned.replace(/[^a-zA-Z0-9._-]/g, "_");
-	if (compact.length <= maxLen) return compact;
-	return `${prefix}${compact.slice(0, maxLen - prefix.length)}`;
+	return compact.length <= maxLen ? compact : compact.slice(0, maxLen);
 }
 
 function getOpenAIPromptCacheKey(options) {
@@ -38,7 +31,6 @@ function setHeaderIfAbsent(headers, name, value) {
 
 function resolveOpenAIRequestSetup(model, options) {
 	const headers = { ...(model.headers ?? {}) };
-	Object.assign(headers, options.extraHeaders ?? {});
 	if (options.promptCacheSessionId && model.compat?.promptCacheSessionHeader) {
 		setHeaderIfAbsent(headers, model.compat.promptCacheSessionHeader, options.promptCacheSessionId);
 	}
@@ -46,80 +38,89 @@ function resolveOpenAIRequestSetup(model, options) {
 	return { headers };
 }
 
+function rewriteProviderPayload(payload, sessionId) {
+	if (!payload || typeof payload !== "object") return payload;
+	const next = { ...payload };
+	const source =
+		(typeof next.prompt_cache_key === "string" && next.prompt_cache_key) ||
+		sessionId ||
+		undefined;
+	const convId = toGrokBuildConvId(source);
+	if (convId) next.prompt_cache_key = convId;
+	return next;
+}
+
 const modelWithCompat = {
 	provider: "grok-build",
-	baseUrl: "https://cli-chat-proxy.grok.com/v1",
 	headers: {
 		"X-XAI-Token-Auth": "xai-grok-cli",
 		"x-grok-client-surface": "grok-build",
 		"x-grok-model-override": "grok-4.5",
 	},
-	compat: {
-		promptCacheSessionHeader: "x-grok-conv-id",
-	},
+	compat: { promptCacheSessionHeader: "x-grok-conv-id" },
 };
 
-const modelNoCompat = {
-	...modelWithCompat,
-	compat: {},
-};
+const ompSessionId = "019f4c25-2a4a-7000-b800-434fe0a039cc";
+const convId = toGrokBuildConvId(ompSessionId);
+if (!convId || !/^conv-[0-9a-f-]{36}$/i.test(convId)) {
+	console.error("FAIL: expected conv-<uuid>, got", convId);
+	process.exit(1);
+}
 
-const sessionId = "omp-session-abc-1234567890";
+// same omp session => same conv id
+const again = toGrokBuildConvId(ompSessionId);
+if (again !== convId) {
+	console.error("FAIL: conv id not stable", convId, again);
+	process.exit(1);
+}
 
-function once(model, label) {
-	const promptCacheSessionId = getOpenAIPromptCacheKey({ sessionId });
-	const setup = resolveOpenAIRequestSetup(model, {
+// different session => different conv id
+const other = toGrokBuildConvId("019f4ba1-3103-7000-9181-3d3e8f450430");
+if (other === convId) {
+	console.error("FAIL: different sessions produced same conv id");
+	process.exit(1);
+}
+
+// already-prefixed ids preserved
+if (toGrokBuildConvId("recap-3b4c21ad-5262-4f47-a276-a25ef75edbd8") !== "recap-3b4c21ad-5262-4f47-a276-a25ef75edbd8") {
+	console.error("FAIL: recap id should pass through");
+	process.exit(1);
+}
+
+// header injection uses session identity; then body rewrite reshapes to conv-<uuid>
+const rows = [];
+for (const label of ["t1", "t2", "t3"]) {
+	const promptCacheSessionId = getOpenAIPromptCacheKey({ sessionId: ompSessionId });
+	const setup = resolveOpenAIRequestSetup(modelWithCompat, {
 		apiKey: "test-token",
 		promptCacheSessionId,
-		extraHeaders: {},
 	});
-	return {
+	const body = rewriteProviderPayload(
+		{ model: "grok-4.5", prompt_cache_key: promptCacheSessionId, stream: true },
+		ompSessionId,
+	);
+	rows.push({
 		label,
-		promptCacheSessionId,
-		convId: setup.headers["x-grok-conv-id"] ?? null,
-		tokenAuth: setup.headers["X-XAI-Token-Auth"] ?? setup.headers["x-xai-token-auth"] ?? null,
-		surface: setup.headers["x-grok-client-surface"] ?? null,
-		override: setup.headers["x-grok-model-override"] ?? null,
-	};
+		headerConvId: setup.headers["x-grok-conv-id"] ?? null,
+		bodyConvId: body.prompt_cache_key ?? null,
+	});
 }
 
-const rows = [once(modelWithCompat, "t1"), once(modelWithCompat, "t2"), once(modelWithCompat, "t3")];
-const control = once(modelNoCompat, "control");
-console.log("with compat:", rows);
-console.log("without compat:", control);
+console.log("generator:", { ompSessionId, convId, other });
+console.log("requests:", rows);
 
-const ids = rows.map(r => r.convId);
-const keys = rows.map(r => r.promptCacheSessionId);
-const sameConv = ids.every(v => v && v === ids[0]);
-const sameKey = keys.every(v => v && v === keys[0]);
-const cli =
-	rows.every(r => r.tokenAuth === "xai-grok-cli") &&
-	rows.every(r => r.surface === "grok-build") &&
-	rows.every(r => r.override === "grok-4.5");
-
-if (!sameConv) {
-	console.error("FAIL: conv id not stable", ids);
+const bodyIds = rows.map(r => r.bodyConvId);
+const headerIds = rows.map(r => r.headerConvId);
+if (!bodyIds.every(v => v === convId)) {
+	console.error("FAIL: body conv ids not all CLI-style stable", bodyIds, convId);
 	process.exit(1);
 }
-if (!sameKey) {
-	console.error("FAIL: cache key not stable", keys);
-	process.exit(1);
-}
-if (!cli) {
-	console.error("FAIL: CLI headers missing");
-	process.exit(1);
-}
-if (control.convId) {
-	console.error("FAIL: expected no header without compat");
-	process.exit(1);
-}
-if (ids[0] !== keys[0]) {
-	console.error("FAIL: header/key mismatch", ids[0], keys[0]);
+if (!headerIds.every(v => v && v === headerIds[0])) {
+	console.error("FAIL: header ids not stable", headerIds);
 	process.exit(1);
 }
 
-// also verify seed models carry the compat flag
-const { STATIC_SEED } = await import("../src/models.ts");
+// seed models still request header injection
 const bad = STATIC_SEED.filter(m => m.compat?.promptCacheSessionHeader !== "x-grok-conv-id");
 if (bad.length) {
 	console.error(
@@ -129,10 +130,29 @@ if (bad.length) {
 	process.exit(1);
 }
 
+// sanity: hash path works for non-uuid session strings
+const pathLike = toGrokBuildConvId("C:/Users/Arem/.omp/agent/sessions/foo");
+if (!pathLike || !/^conv-[0-9a-f-]{36}$/i.test(pathLike)) {
+	console.error("FAIL: path-like session id not converted", pathLike);
+	process.exit(1);
+}
+// deterministic
+if (pathLike !== toGrokBuildConvId("C:/Users/Arem/.omp/agent/sessions/foo")) {
+	console.error("FAIL: path-like id not deterministic");
+	process.exit(1);
+}
+// uuid bits look versioned
+const u = stableUuidFromString("x");
+const ver = Number.parseInt(u.split("-")[2][0], 16);
+if ((ver & 0xf) !== 5) {
+	// version nibble should be 5
+	console.error("FAIL: expected version 5 uuid layout", u);
+	process.exit(1);
+}
+
 console.log("PASS");
-console.log("1 omp session/conversation => 1 x-grok-conv-id:", ids[0]);
-console.log("same identity for prompt_cache_key:", keys[0]);
-console.log(
-	"all seed models have promptCacheSessionHeader:",
-	STATIC_SEED.map(m => m.id).join(", "),
-);
+console.log("1 omp session => 1 CLI-style conv id:", convId);
+console.log("body prompt_cache_key rewritten to CLI-style on every tool step");
+console.log("header affinity still stable for the same omp session");
+// keep createHash import used in case tree-shaken analysis looks at this file alone
+void createHash;

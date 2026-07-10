@@ -14,6 +14,7 @@ import {
 	GROK_BUILD_BASE_URL,
 	GROK_BUILD_HEADERS,
 } from "./constants";
+import { toGrokBuildConvId } from "./conv-id";
 
 export interface GrokBuildModelDef {
 	id: string;
