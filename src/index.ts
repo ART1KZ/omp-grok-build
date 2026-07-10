@@ -6,25 +6,13 @@
  * Product surface matches official Grok Build CLI proxy:
  *   https://cli-chat-proxy.grok.com/v1/responses
  *
- * Fingerprint (from official grok-pager HAR / community reverse-engineering):
- * - X-XAI-Token-Auth: xai-grok-cli
- * - x-grok-client-identifier: grok-pager
- * - x-grok-client-version
- * - x-authenticateresponse
- * - x-grok-session-id + x-grok-conv-id (same id on main chat turns)
- * - x-grok-req-id (new uuid every request)
- * - x-grok-turn-idx (monotonic per conversation)
- * - x-grok-model-override
- *
- * Existing solutions in the wild: decolua/9router, IgorWarzocha/pi-grok-build,
- * Cherry Studio grokCli, justlovemaki/AIClient2API, Yeachan-Heo/gajae-code.
- *
  * Install:
  *   omp plugin install github:ART1KZ/omp-grok-build
  *
  * Use:
  *   /login  → Grok Build (CLI proxy)
  *   /model grok-build/grok-4.5
+ *   /grok-build-usage
  */
 
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
@@ -36,6 +24,7 @@ import {
 } from "./constants";
 import { STATIC_SEED } from "./models";
 import { streamGrokBuildCli } from "./stream";
+import { fetchGrokBillingUsage, formatGrokUsage } from "./usage";
 import {
 	loginGrokBuildOAuth,
 	refreshGrokBuildOAuthToken,
@@ -46,13 +35,22 @@ function getApiKey(credentials: OAuthCredentials): string {
 	return credentials.access;
 }
 
+async function resolveAccessToken(
+	modelRegistry: {
+		getApiKeyForProvider(provider: string, sessionId?: string): Promise<string | undefined>;
+	},
+): Promise<string | undefined> {
+	const fromBuild = await modelRegistry.getApiKeyForProvider(PROVIDER_ID);
+	if (fromBuild) return fromBuild;
+	return modelRegistry.getApiKeyForProvider("xai-oauth");
+}
+
 export default function ompGrokBuildExtension(pi: ExtensionAPI): void {
 	pi.setLabel("Grok Build (CLI proxy)");
 
 	pi.registerProvider(PROVIDER_ID, {
 		baseUrl: GROK_BUILD_BASE_URL,
 		api: GROK_BUILD_API,
-		// Custom stream injects per-request CLI fingerprint headers.
 		streamSimple: streamGrokBuildCli,
 		authHeader: true,
 		headers: { ...GROK_BUILD_HEADERS },
@@ -84,23 +82,40 @@ export default function ompGrokBuildExtension(pi: ExtensionAPI): void {
 				[
 					"Grok Build provider",
 					"",
-					"  /login   →  Grok Build (CLI proxy)",
-					"  /logout  →  Grok Build",
+					"  /login             →  Grok Build (CLI proxy)",
+					"  /logout            →  Grok Build",
 					"  /model grok-build/grok-4.5",
+					"  /grok-build-usage  →  Build/Imagine quota",
 					"",
 					"Auth is OAuth only (agent.db, provider id: grok-build).",
-					"Do NOT put providers.grok-build.apiKey in models.yml —",
-					"config apiKey beats OAuth and survives /logout.",
-					"",
 					"Route: cli-chat-proxy.grok.com /v1/responses",
-					"IDs:   session=conv (stable), req=new each call, turn-idx",
 					"Not:   xai-oauth / api.x.ai (SuperGrok API path)",
-					"",
-					"Note: ~/.grok/auth.json is official Grok CLI login.",
-					"/logout does not delete that file (separate client).",
 				].join("\n"),
 				"info",
 			);
+		},
+	});
+
+	pi.registerCommand("grok-build-usage", {
+		description: "Show Grok Build / subscription quota from CLI billing",
+		handler: async (_args, ctx) => {
+			try {
+				const access = await resolveAccessToken(ctx.modelRegistry);
+				if (!access) {
+					ctx.ui.notify(
+						"No Grok token found. Run /login → Grok Build (CLI proxy) first.",
+						"error",
+					);
+					return;
+				}
+				const snapshot = await fetchGrokBillingUsage(access);
+				ctx.ui.notify(formatGrokUsage(snapshot), "info");
+			} catch (error) {
+				ctx.ui.notify(
+					`Usage fetch failed: ${error instanceof Error ? error.message : String(error)}`,
+					"error",
+				);
+			}
 		},
 	});
 }
