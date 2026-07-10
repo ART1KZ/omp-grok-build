@@ -4,7 +4,7 @@
 
 **Провайдер Grok Build для [Oh My Pi](https://github.com/can1357/oh-my-pi)**
 
-Нативный `/login` · CLI proxy route · более высокие лимиты Build · без форка omp
+Нативный `/login` · CLI proxy route · более высокие лимиты Build
 
 <br/>
 
@@ -134,7 +134,7 @@ modelRoles:
 - CLI proxy endpoint + нужные CLI headers
 - Hybrid catalog: offline seed + live discovery
 - Принудительный refresh: `omp models refresh`
-- Перенос на другие машины без форка omp
+- Перенос на другие машины
 
 ---
 

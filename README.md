@@ -4,7 +4,7 @@
 
 **Grok Build provider for [Oh My Pi](https://github.com/can1357/oh-my-pi)**
 
-Native `/login` · CLI proxy route · higher Build limits · no omp fork
+Native `/login` · CLI proxy route · higher Build limits
 
 <br/>
 
@@ -134,7 +134,7 @@ No hand-written `models.yml` is required. The extension registers the provider, 
 - CLI proxy endpoint + required CLI headers
 - Hybrid model catalog: offline seed + live discovery
 - Force refresh with `omp models refresh`
-- Portable across machines without forking omp
+- Portable install on any machine
 
 ---
 
