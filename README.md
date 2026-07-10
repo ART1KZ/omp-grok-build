@@ -82,6 +82,14 @@ Optional help command:
 /grok-build-help
 ```
 
+### Login UI note
+
+In an interactive omp session, `/login` includes **Grok Build (CLI proxy)** after this extension loads.
+
+Headless `omp auth-broker list` only prints built-in registry providers and may **not** show extension OAuth providers. That is expected: extension registration happens when the session/extensions path loads (same path as `omp models list`).
+
+Use TUI `/login` after the plugin is installed.
+
 ### Recommended omp config
 
 ```yaml
