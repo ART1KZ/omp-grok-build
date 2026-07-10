@@ -1,46 +1,27 @@
 /**
  * omp-grok-build
- * ==============
  *
- * First-class Grok Build CLI route for Oh My Pi — without forking omp.
+ * Grok Build provider for Oh My Pi.
  *
- * ## Why this extension exists
+ * Registers provider `grok-build` against the official CLI proxy:
+ *   https://cli-chat-proxy.grok.com/v1
  *
- * Stock omp Grok auth (`xai-oauth`) routes inference through SuperGrok / api.x.ai.
- * For SuperGrok / SuperGrok Heavy users that often burns the shared weekly Grok
- * quota like API usage — even when the selected model id is `grok-build`.
+ * Compared with stock `xai-oauth` (api.x.ai / SuperGrok API path):
+ * - native /login for Grok Build
+ * - credentials stored under `grok-build`
+ * - CLI headers and Build/CLI limits
  *
- * Official Grok Build CLI is a different product surface:
- * 1) same OAuth client family
- * 2) different endpoint: https://cli-chat-proxy.grok.com/v1
- * 3) CLI headers (`X-XAI-Token-Auth: xai-grok-cli`, client-surface, model override)
- * 4) higher Grok Build CLI limits, so weekly SuperGrok quota is preserved
+ * Model discovery is hybrid:
+ * - no auth  → static seed
+ * - with auth → GET /v1/models + curated overlays
+ * omp caches the result (~24h); force with `omp models refresh`.
  *
- * `xai-oauth/grok-build` is NOT this path. Same-looking model name, SuperGrok route.
+ * Install:
+ *   omp plugin install github:ART1KZ/omp-grok-build
  *
- * This extension registers provider id `grok-build` as the real CLI surface, with
- * its own `/login` + credential store. It intentionally does NOT use
- * `storeCredentialsAs: "xai-oauth"`.
- *
- * ## Model discovery (hybrid)
- *
- * Extension API: `models` and `fetchDynamicModels` are mutually exclusive.
- * We use only `fetchDynamicModels`:
- *   - no auth  → static seed (always available offline)
- *   - with auth → GET /v1/models, merge with curated overlays + seed backfill
- *
- * omp caches the discovered list in models.db for ~24h (authoritative runtime
- * manager). Models are NOT frozen forever after first login — they refresh on
- * cache expiry / model refresh. Account tier can change which models appear.
- *
- * ## Install
- *
- * ```bash
- * omp plugin install github:ART1KZ/omp-grok-build
- * # or: omp plugin link ./omp-grok-build
- * ```
- *
- * Then: /login → Grok Build (CLI proxy) · /model grok-build/grok-4.5
+ * Use:
+ *   /login  → Grok Build (CLI proxy)
+ *   /model grok-build/grok-4.5
  */
 
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
@@ -66,19 +47,12 @@ export default function ompGrokBuildExtension(pi: ExtensionAPI): void {
 	pi.registerProvider(PROVIDER_ID, {
 		baseUrl: GROK_BUILD_BASE_URL,
 		api: "openai-responses",
-		// Bearer from OAuth storage after /login. authHeader injects Authorization.
 		authHeader: true,
 		headers: { ...GROK_BUILD_HEADERS },
-		// Hybrid: seed when logged out, live /v1/models when authenticated.
-		// Do NOT also pass `models` — omp treats that as exclusive and would
-		// skip fetchDynamicModels entirely.
+		// Hybrid catalog. Do not also pass `models` — omp treats that as exclusive.
 		fetchDynamicModels: async apiKey => fetchGrokBuildModels(apiKey),
 		oauth: {
 			name: "Grok Build (CLI proxy)",
-			/**
-			 * Device-code flow (same client as official `grok login --device-auth`).
-			 * Credentials are stored under provider id `grok-build` only.
-			 */
 			login: async callbacks => loginGrokBuildOAuth(callbacks),
 			refreshToken: async credentials =>
 				refreshGrokBuildOAuthToken(credentials.refresh),
@@ -87,37 +61,21 @@ export default function ompGrokBuildExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.registerCommand("grok-build-help", {
-		description: "Explain Grok Build CLI route vs SuperGrok xai-oauth quota",
+		description: "Grok Build provider help",
 		handler: async (_args, ctx) => {
 			ctx.ui.notify(
 				[
-					"Grok Build extension loaded (hybrid catalog).",
+					"Grok Build provider",
 					"",
-					"Use:",
 					"  /login  →  Grok Build (CLI proxy)",
 					"  /model grok-build/grok-4.5",
+					"  omp models refresh",
 					"",
-					"Why it exists:",
-					"  stock xai-oauth/*  → SuperGrok / api.x.ai, weekly quota like API",
-					"  grok-build/*       → cli-chat-proxy, real Build CLI limits",
-					"",
-					"Models:",
-					"  - offline: static seed",
-					"  - after login: live /v1/models + curated overlays",
-					"  - omp caches ~24h; force with: omp models refresh",
+					"Route: cli-chat-proxy.grok.com (Build/CLI limits)",
+					"Not:   xai-oauth / api.x.ai (SuperGrok API path)",
 				].join("\n"),
 				"info",
 			);
 		},
-	});
-
-	pi.on("session_start", async (_event, ctx) => {
-		const model = ctx.model;
-		if (!model) {
-			ctx.ui.notify(
-				"Grok Build extension ready. /login → Grok Build (CLI proxy), then /model grok-build/grok-4.5",
-				"info",
-			);
-		}
 	});
 }
