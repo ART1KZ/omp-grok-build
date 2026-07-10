@@ -17,11 +17,6 @@
  * - credentials stored under `grok-build`
  * - CLI headers and Build/CLI limits
  *
- * Model discovery is hybrid:
- * - no auth  → static seed
- * - with auth → GET /v1/models + curated overlays
- * omp caches the result (~24h); force with `omp models refresh`.
- *
  * Install:
  *   omp plugin install github:ART1KZ/omp-grok-build
  *
@@ -36,7 +31,7 @@ import {
 	GROK_BUILD_HEADERS,
 	PROVIDER_ID,
 } from "./constants";
-import { fetchGrokBuildModels } from "./models";
+import { STATIC_SEED } from "./models";
 import {
 	loginGrokBuildOAuth,
 	refreshGrokBuildOAuthToken,
@@ -55,8 +50,22 @@ export default function ompGrokBuildExtension(pi: ExtensionAPI): void {
 		api: "openai-responses",
 		authHeader: true,
 		headers: { ...GROK_BUILD_HEADERS },
-		// Hybrid catalog. Do not also pass `models` — omp treats that as exclusive.
-		fetchDynamicModels: async apiKey => fetchGrokBuildModels(apiKey),
+		// Static seed keeps models visible before/without auth.
+		// Official CLI wire: /v1/responses + CLI headers + x-grok-conv-id affinity.
+		// omp treats `models` and `fetchDynamicModels` exclusively; seed is used
+		// for reliability and boot visibility.
+		models: STATIC_SEED.map(model => ({
+			id: model.id,
+			name: model.name,
+			api: model.api,
+			reasoning: model.reasoning,
+			input: model.input,
+			cost: model.cost,
+			contextWindow: model.contextWindow,
+			maxTokens: model.maxTokens,
+			headers: model.headers,
+			compat: model.compat,
+		})),
 		oauth: {
 			name: "Grok Build (CLI proxy)",
 			login: async callbacks => loginGrokBuildOAuth(callbacks),
@@ -75,9 +84,8 @@ export default function ompGrokBuildExtension(pi: ExtensionAPI): void {
 					"",
 					"  /login  →  Grok Build (CLI proxy)",
 					"  /model grok-build/grok-4.5",
-					"  omp models refresh",
 					"",
-					"Route: cli-chat-proxy.grok.com (Build/CLI limits)",
+					"Route: cli-chat-proxy.grok.com /v1/responses",
 					"Not:   xai-oauth / api.x.ai (SuperGrok API path)",
 				].join("\n"),
 				"info",

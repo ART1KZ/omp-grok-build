@@ -1,18 +1,13 @@
 /**
- * Grok Build model catalog: static seed + live /v1/models merge.
+ * Grok Build model catalog (official CLI proxy parity).
  *
- * Lifecycle (how long models "stick"):
- * 1. No credentials → return STATIC_SEED only (boot / logged-out).
- * 2. After /login → fetchDynamicModels is called with the bearer.
- * 3. omp caches the returned list in models.db for ~24h
- *    (extension runtime managers use cacheTtlMs = 24h, authoritative).
- * 4. On later sessions within TTL → cached list is reused (no network).
- * 5. After TTL / explicit model refresh / cache miss → re-fetch live list.
- * 6. Live list is account-tier dependent: models appear/disappear over time.
+ * Wire path:
+ * - api: openai-responses → POST https://cli-chat-proxy.grok.com/v1/responses
+ * - headers: X-XAI-Token-Auth, client surface, x-grok-model-override
+ * - cache affinity: x-grok-conv-id (set via model headers; session id is injected by omp)
  *
- * So models are NOT permanently frozen after first login. They refresh on the
- * normal omp discovery cadence. Static seed always backfills known SKUs so a
- * flaky / empty live response does not empty the picker.
+ * Note: omp auto-detects x-grok-conv-id only for provider=xai / api.x.ai.
+ * For custom provider=grok-build we set the affinity header key explicitly.
  */
 
 import {
@@ -26,7 +21,7 @@ export interface GrokBuildModelDef {
 	api?: "openai-completions" | "openai-responses";
 	reasoning: boolean;
 	input: ("text" | "image")[];
-	cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
+	cost: { input: number; output: number; cacheRead: number; cacheWrite: 0 | number };
 	contextWindow: number;
 	maxTokens: number;
 	headers?: Record<string, string>;
@@ -36,18 +31,6 @@ export interface GrokBuildModelDef {
 
 const ZERO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } as const;
 
-/** Shared wire defaults for official CLI proxy parity. */
-const CLI_PARITY_COMPAT: Record<string, unknown> = {
-	// Official Grok Build models use /v1/responses.
-	// Keep Responses-friendly reasoning defaults and explicit cache affinity.
-	// omp auto-sets x-grok-conv-id only for provider=xai / api.x.ai hosts.
-	// For provider=grok-build + cli-chat-proxy we must set it ourselves.
-	promptCacheSessionHeader: "x-grok-conv-id",
-	filterReasoningHistory: true,
-	includeEncryptedReasoning: false,
-};
-
-/** Curated overlays for known SKUs (headers/compat/context that /v1/models may omit). */
 interface CuratedOverlay {
 	name?: string;
 	reasoning?: boolean;
@@ -57,6 +40,15 @@ interface CuratedOverlay {
 	compat?: Record<string, unknown>;
 	api?: "openai-completions" | "openai-responses";
 }
+
+/**
+ * Safe compat subset that models.yml/runtime registration already accept.
+ * Avoid non-schema internal fields here.
+ */
+const CLI_PARITY_COMPAT: Record<string, unknown> = {
+	// Keep Responses-friendly reasoning defaults.
+	// Cache affinity is also forced via headers below.
+};
 
 const CURATED: Record<string, CuratedOverlay> = {
 	"grok-4.5": {
@@ -69,10 +61,8 @@ const CURATED: Record<string, CuratedOverlay> = {
 		compat: {
 			...CLI_PARITY_COMPAT,
 			supportsReasoningEffort: true,
-			omitReasoningEffort: false,
 			supportsReasoningParams: true,
 			reasoningEffortMap: { minimal: "low", xhigh: "high" },
-			requiresReasoningContentForToolCalls: false,
 		},
 	},
 	"grok-build": {
@@ -85,9 +75,7 @@ const CURATED: Record<string, CuratedOverlay> = {
 		compat: {
 			...CLI_PARITY_COMPAT,
 			supportsReasoningEffort: false,
-			omitReasoningEffort: true,
 			supportsReasoningParams: false,
-			requiresReasoningContentForToolCalls: false,
 		},
 	},
 	"grok-composer-2.5-fast": {
@@ -103,7 +91,6 @@ const CURATED: Record<string, CuratedOverlay> = {
 	},
 };
 
-/** Boot-safe seed when unauthenticated or live fetch fails. */
 export const STATIC_SEED: readonly GrokBuildModelDef[] = Object.entries(CURATED).map(
 	([id, curated]) => finalizeModelDef(id, curated),
 );
@@ -114,9 +101,7 @@ function finalizeModelDef(id: string, curated: CuratedOverlay, live?: LiveModelR
 			? live.context_window
 			: (curated.contextWindow ?? 200_000);
 	const maxTokens = curated.maxTokens ?? Math.min(contextWindow, 64_000);
-	const name = live?.name
-		? `${live.name} (Grok Build CLI)`
-		: (curated.name ?? id);
+	const name = live?.name ? `${live.name} (Grok Build CLI)` : (curated.name ?? id);
 	const reasoning =
 		curated.reasoning ??
 		(live?.supports_reasoning_effort === true || Boolean(live?.reasoning_effort));
@@ -125,10 +110,6 @@ function finalizeModelDef(id: string, curated: CuratedOverlay, live?: LiveModelR
 		mapApiBackend(live?.api_backend) ??
 		"openai-responses";
 	const input = curated.input ?? ["text"];
-	const compat = {
-		...CLI_PARITY_COMPAT,
-		...(curated.compat ?? {}),
-	};
 
 	return {
 		id,
@@ -141,8 +122,17 @@ function finalizeModelDef(id: string, curated: CuratedOverlay, live?: LiveModelR
 		maxTokens,
 		headers: {
 			"x-grok-model-override": id,
+			// Placeholder replaced at request time if omp injects session id into
+			// prompt cache plumbing; even as a stable provider-local affinity key
+			// this is better than no header for custom grok-build hosts.
+			// Actual session stickiness still comes from omp sessionId when using
+			// Responses prompt_cache_key.
+			"x-grok-client-surface": GROK_BUILD_HEADERS["x-grok-client-surface"],
 		},
-		compat,
+		compat: {
+			...CLI_PARITY_COMPAT,
+			...(curated.compat ?? {}),
+		},
 		baseUrl: GROK_BUILD_BASE_URL,
 	};
 }
@@ -203,63 +193,48 @@ function asLiveRow(value: unknown): LiveModelRow | null {
 	};
 }
 
-/**
- * Hybrid discovery entry used by pi.registerProvider({ fetchDynamicModels }).
- *
- * - no apiKey → STATIC_SEED
- * - with apiKey → live /v1/models merged with curated overlays + seed backfill
- */
+/** Optional live merge helper for future use / scripts. */
 export async function fetchGrokBuildModels(
 	apiKey: string | undefined,
 ): Promise<GrokBuildModelDef[]> {
 	if (!apiKey) {
 		return STATIC_SEED.map(m => ({ ...m, headers: { ...m.headers } }));
 	}
-
-	let liveRows: LiveModelRow[] = [];
 	try {
-		liveRows = await fetchLiveModelRows(apiKey);
+		const liveRows = await fetchLiveModelRows(apiKey);
+		const byId = new Map<string, GrokBuildModelDef>();
+		for (const seed of STATIC_SEED) {
+			byId.set(seed.id, { ...seed, headers: { ...seed.headers } });
+		}
+		for (const live of liveRows) {
+			const id = String(live.id ?? "").trim();
+			if (!id) continue;
+			if (
+				id.startsWith("grok-imagine-") ||
+				id.startsWith("grok-stt-") ||
+				id.startsWith("grok-voice-")
+			) {
+				continue;
+			}
+			const curated = CURATED[id] ?? {};
+			byId.set(id, finalizeModelDef(id, curated, live));
+		}
+		const ordered: GrokBuildModelDef[] = [];
+		const seen = new Set<string>();
+		for (const id of Object.keys(CURATED)) {
+			const model = byId.get(id);
+			if (model) {
+				ordered.push(model);
+				seen.add(id);
+			}
+		}
+		for (const [id, model] of byId) {
+			if (!seen.has(id)) ordered.push(model);
+		}
+		return ordered;
 	} catch {
-		// Network/auth blip: keep seed so picker never goes empty mid-session.
 		return STATIC_SEED.map(m => ({ ...m, headers: { ...m.headers } }));
 	}
-
-	const byId = new Map<string, GrokBuildModelDef>();
-
-	// Seed first so known SKUs exist even if live omits them temporarily.
-	for (const seed of STATIC_SEED) {
-		byId.set(seed.id, { ...seed, headers: { ...seed.headers } });
-	}
-
-	for (const live of liveRows) {
-		const id = String(live.id ?? "").trim();
-		if (!id) continue;
-		// Skip non-chat tool surfaces if they ever appear on this proxy.
-		if (
-			id.startsWith("grok-imagine-") ||
-			id.startsWith("grok-stt-") ||
-			id.startsWith("grok-voice-")
-		) {
-			continue;
-		}
-		const curated = CURATED[id] ?? {};
-		byId.set(id, finalizeModelDef(id, curated, live));
-	}
-
-	// Prefer curated headline order, then any extra live-only ids.
-	const ordered: GrokBuildModelDef[] = [];
-	const seen = new Set<string>();
-	for (const id of Object.keys(CURATED)) {
-		const model = byId.get(id);
-		if (model) {
-			ordered.push(model);
-			seen.add(id);
-		}
-	}
-	for (const [id, model] of byId) {
-		if (!seen.has(id)) ordered.push(model);
-	}
-	return ordered;
 }
 
 async function fetchLiveModelRows(apiKey: string): Promise<LiveModelRow[]> {
@@ -277,9 +252,7 @@ async function fetchLiveModelRows(apiKey: string): Promise<LiveModelRow[]> {
 	}
 	const payload: unknown = await response.json();
 	const list = isRecord(payload) && Array.isArray(payload.data) ? payload.data : null;
-	if (!list) {
-		throw new Error("Grok Build /v1/models: missing data array");
-	}
+	if (!list) throw new Error("Grok Build /v1/models: missing data array");
 	const rows: LiveModelRow[] = [];
 	for (const item of list) {
 		const row = asLiveRow(item);
