@@ -106,8 +106,10 @@ Marketplace installs do not load extension modules. Use `omp plugin install`, `o
 | Sign in | `/login` → **Grok Build (CLI proxy)** |
 | Sign out | `/logout` → **Grok Build** |
 | Choose model | `/model grok-build/grok-4.5` |
+| Build quota | `/grok-build-usage` |
 | Help | `/grok-build-help` |
 | Refresh model list | `omp models refresh` |
+
 
 
 ### Recommended config
@@ -137,9 +139,21 @@ No hand-written `models.yml` is required. The extension registers the provider, 
 - Separate credential store (`grok-build`)
 - Automatic token refresh
 - CLI proxy endpoint + required CLI headers
+- `/grok-build-usage` — Build/Imagine quota from CLI billing
 - Hybrid model catalog: offline seed + live discovery
 - Force refresh with `omp models refresh`
 - Portable install on any machine
+
+### Usage vs core omp
+
+| | This extension | Core omp |
+|---|---|---|
+| **Chat path** | `cli-chat-proxy` (Build product) | stock `xai-oauth` → `api.x.ai` |
+| **Quota UI** | `/grok-build-usage` now | `/usage` via open PR [#4874](https://github.com/can1357/oh-my-pi/pull/4874) for `xai-oauth` |
+| **Issue** | Build routing [#4945](https://github.com/can1357/oh-my-pi/issues/4945) | missing Grok in usage [#5065](https://github.com/can1357/oh-my-pi/issues/5065) |
+
+Seeing a **GrokBuild %** line under SuperGrok usage is not the same as chat already using the Build route. This plugin is the Build **chat** path.
+
 
 ---
 
