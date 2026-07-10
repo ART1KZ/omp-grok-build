@@ -104,9 +104,11 @@ Marketplace install не загружает extension modules. Нужны `omp p
 | Действие | Команда |
 |---|---|
 | Войти | `/login` → **Grok Build (CLI proxy)** |
+| Выйти | `/logout` → **Grok Build** |
 | Выбрать модель | `/model grok-build/grok-4.5` |
 | Справка | `/grok-build-help` |
 | Обновить список моделей | `omp models refresh` |
+
 
 ### Рекомендуемый config
 
@@ -123,6 +125,9 @@ modelRoles:
 ```
 
 Ручной `models.yml` не нужен. Extension сам регистрирует provider, models, headers и login flow.
+
+**Не ставь `providers.grok-build.apiKey` в `models.yml`.** Config `apiKey` перекрывает OAuth и переживает `/logout` — после logout Grok Build всё ещё выглядит залогиненным.
+
 
 ---
 
@@ -159,9 +164,13 @@ modelRoles:
 | Flow | device-code OAuth |
 | Client | публичный Grok CLI client |
 | Storage | omp `agent.db` под `grok-build` |
+| Login | `/login` → Grok Build |
+| Logout | `/logout` → Grok Build (только OAuth в `agent.db`) |
 | Refresh | автоматически |
 
 Бинарник `grok` не обязателен. Login работает внутри omp.
+
+`/logout` **не** удаляет `~/.grok/auth.json` (логин official CLI). Это отдельный клиент.
 
 В interactive `/login` провайдер появляется после загрузки extension. Headless `omp auth-broker list` показывает только built-in providers.
 
