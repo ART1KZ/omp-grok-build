@@ -1,7 +1,7 @@
 {
   "name": "omp-grok-build",
   "version": "0.1.0",
-  "description": "Oh My Pi extension: Grok Build CLI proxy provider with native /login (cli-chat-proxy.grok.com)",
+  "description": "Oh My Pi extension: real Grok Build CLI route (cli-chat-proxy) with native /login — preserve SuperGrok weekly quota",
   "license": "MIT",
   "type": "module",
   "private": false,
@@ -25,6 +25,7 @@
   "files": [
     "src",
     "README.md",
+    "README.ru.md",
     "LICENSE"
   ],
   "peerDependencies": {

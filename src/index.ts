@@ -2,31 +2,24 @@
  * omp-grok-build
  * ==============
  *
- * First-class Grok Build provider for Oh My Pi — without forking omp and without
- * depending on SuperGrok (`xai-oauth`) billing.
+ * First-class Grok Build CLI route for Oh My Pi — without forking omp.
  *
  * ## Why this extension exists
  *
- * There are TWO different product surfaces that people mix up:
+ * Stock omp Grok auth (`xai-oauth`) routes inference through SuperGrok / api.x.ai.
+ * For SuperGrok / SuperGrok Heavy users that often burns the shared weekly Grok
+ * quota like API usage — even when the selected model id is `grok-build`.
  *
- * 1) `xai-oauth` (built into omp)
- *    - Auth: SuperGrok / X Premium+ OAuth
- *    - Inference: https://api.x.ai/v1 (Responses)
- *    - Model ids like `xai-oauth/grok-build` still bill through SuperGrok path
- *    - This is what "eats" SuperGrok account quota
+ * Official Grok Build CLI is a different product surface:
+ * 1) same OAuth client family
+ * 2) different endpoint: https://cli-chat-proxy.grok.com/v1
+ * 3) CLI headers (`X-XAI-Token-Auth: xai-grok-cli`, client-surface, model override)
+ * 4) higher Grok Build CLI limits, so weekly SuperGrok quota is preserved
  *
- * 2) Grok Build CLI product (`grok` binary)
- *    - Auth: same xAI OAuth client, but session is used as CLI token
- *    - Inference: https://cli-chat-proxy.grok.com/v1
- *    - Required headers:
- *        Authorization: Bearer <token>
- *        X-XAI-Token-Auth: xai-grok-cli
- *        x-grok-model-override: <model>
- *        x-grok-client-surface: grok-build   (client identity)
- *    - Billing/limits are the Build/CLI free/subscription window, not SuperGrok API
+ * `xai-oauth/grok-build` is NOT this path. Same-looking model name, SuperGrok route.
  *
- * This extension registers provider id `grok-build` as (2), with its own
- * `/login` + credential store. It intentionally does NOT use
+ * This extension registers provider id `grok-build` as the real CLI surface, with
+ * its own `/login` + credential store. It intentionally does NOT use
  * `storeCredentialsAs: "xai-oauth"`.
  *
  * ## Model discovery (hybrid)
@@ -94,7 +87,7 @@ export default function ompGrokBuildExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.registerCommand("grok-build-help", {
-		description: "Explain Grok Build provider vs xai-oauth SuperGrok",
+		description: "Explain Grok Build CLI route vs SuperGrok xai-oauth quota",
 		handler: async (_args, ctx) => {
 			ctx.ui.notify(
 				[
@@ -104,14 +97,14 @@ export default function ompGrokBuildExtension(pi: ExtensionAPI): void {
 					"  /login  →  Grok Build (CLI proxy)",
 					"  /model grok-build/grok-4.5",
 					"",
+					"Why it exists:",
+					"  stock xai-oauth/*  → SuperGrok / api.x.ai, weekly quota like API",
+					"  grok-build/*       → cli-chat-proxy, real Build CLI limits",
+					"",
 					"Models:",
 					"  - offline: static seed",
 					"  - after login: live /v1/models + curated overlays",
-					"  - omp caches ~24h, then refreshes (not forever frozen)",
-					"",
-					"NOT the same as built-in xai-oauth:",
-					"  xai-oauth/*  → SuperGrok / api.x.ai quota",
-					"  grok-build/* → cli-chat-proxy.grok.com Build/CLI surface",
+					"  - omp caches ~24h; force with: omp models refresh",
 				].join("\n"),
 				"info",
 			);

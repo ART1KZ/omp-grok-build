@@ -2,9 +2,9 @@
 
 <div align="center">
 
-**Полноценный провайдер [Grok Build](https://grok.com) CLI для [Oh My Pi](https://github.com/can1357/oh-my-pi)**
+**Реальный CLI-путь [Grok Build](https://grok.com) для [Oh My Pi](https://github.com/can1357/oh-my-pi)**
 
-Нативный `/login` · отдельные credentials · биллинг CLI proxy · без форка omp
+Grok Build лимиты вместо сжигания недельной квоты SuperGrok как API
 
 <br/>
 
@@ -22,21 +22,29 @@
 
 ## ✨ Зачем это нужно
 
-Люди путают **две разные product surface**:
+В стоковом omp Grok обычно идёт через **`xai-oauth` → `api.x.ai`**.
 
-| | 🟣 SuperGrok path | 🟢 Grok Build path |
+У людей с SuperGrok / SuperGrok Heavy этот путь часто **жрёт общую недельную квоту Grok как API-использование** — даже если model id называется `grok-build`.
+
+Официальный **Grok Build CLI** работает иначе:
+- тот же аккаунт / OAuth family
+- **другой route**: `cli-chat-proxy.grok.com`
+- **другие лимиты**: лимиты Grok Build CLI (обычно намного выше)
+- за счёт этого можно **беречь недельную квоту SuperGrok**, а не сжигать её в omp
+
+| | 🟣 Стоковый SuperGrok path в omp | 🟢 Реальный Grok Build path |
 |---|---|---|
 | **провайдер в omp** | `xai-oauth` *(встроенный)* | `grok-build` *(это extension)* |
 | **endpoint** | `https://api.x.ai/v1` | `https://cli-chat-proxy.grok.com/v1` |
 | **auth store** | `xai-oauth` | `grok-build` |
 | **headers** | обычный API bearer | `X-XAI-Token-Auth: xai-grok-cli` + model override |
-| **биллинг** | квота SuperGrok / X Premium+ | окно Build / CLI usage |
+| **лимиты / биллинг** | недельная квота SuperGrok жрётся как API | лимиты Grok Build CLI (выше) |
 | **пример модели** | `xai-oauth/grok-build` | `grok-build/grok-4.5` |
 
-> ⚠️ Выбор model id `grok-build` внутри `xai-oauth` — **это не Grok Build**.  
-> Это всё ещё SuperGrok auth + SuperGrok billing.
+> ⚠️ `/model xai-oauth/grok-build` — **это не реальный Grok Build**.  
+> Похожее имя модели, SuperGrok route, удар по недельной квоте SuperGrok.
 
-Этот extension подключает **настоящий CLI surface** официального бинарника `grok` — как portable plugin для omp.
+Этот extension даёт omp **настоящий CLI route** официального бинарника `grok` — без форка omp.
 
 ---
 
@@ -209,8 +217,8 @@ pi.registerProvider("grok-build", {
 ## ❓ FAQ
 
 ### Это то же самое, что `/model xai-oauth/grok-build`?
-**Нет.** Там всё ещё SuperGrok auth/billing.  
-Этот extension — CLI proxy surface.
+**Нет.** Там всё ещё SuperGrok / `api.x.ai`, и это может жечь общую недельную квоту как API.  
+Этот extension идёт по реальному Grok Build CLI proxy route с более высокими CLI-лимитами.
 
 ### Можно обновить модели, не ждать 24 часа?
 Да:
@@ -265,8 +273,7 @@ MIT © [ART1KZ](https://github.com/ART1KZ)
 ---
 
 <div align="center">
-
-Для тех, кому нужен **Grok Build в omp**, а не SuperGrok с другим model id.
+Для пользователей SuperGrok, которым нужны **реальные лимиты Grok Build в omp**, а не сжигание недельной квоты под похожим именем модели.
 
 ⭐ Если это спасло тебя от форка — поставь звезду.
 

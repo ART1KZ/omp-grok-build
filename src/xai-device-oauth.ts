@@ -2,11 +2,13 @@
  * xAI device-code OAuth for Grok Build CLI surface.
  *
  * Why this exists:
- * - Grok Build CLI (`grok`) authenticates via auth.x.ai with client_id
+ * - Official Grok Build CLI (`grok`) authenticates via auth.x.ai with client_id
  *   b1a00492-073a-47ea-816f-4c329264a828 and scopes including grok-cli:access.
- * - Oh My Pi's built-in `xai-oauth` uses the same OAuth client, but routes
- *   inference through SuperGrok / api.x.ai billing.
- * - Grok Build product path is different: cli-chat-proxy.grok.com + CLI headers.
+ * - Stock omp `xai-oauth` uses the same OAuth client family, but routes inference
+ *   through SuperGrok / api.x.ai. For SuperGrok / SuperGrok Heavy users that often
+ *   burns the shared weekly Grok quota like API usage.
+ * - Real Grok Build path is different: cli-chat-proxy.grok.com + CLI headers,
+ *   with higher CLI limits, so weekly SuperGrok quota can be preserved.
  * - We reimplement the same device-code grant so /login works inside omp without
  *   requiring the `grok` binary, and store credentials under provider id
  *   `grok-build` so they never mix with SuperGrok account pools.
