@@ -106,7 +106,6 @@ Marketplace install не загружает extension modules. Нужны `omp p
 | Войти | `/login` → **Grok Build (CLI proxy)** |
 | Выйти | `/logout` → **Grok Build** |
 | Выбрать модель | `/model grok-build/grok-4.5` |
-| Квота Build | `/grok-build-usage` |
 | Справка | `/grok-build-help` |
 | Обновить список моделей | `omp models refresh` |
 
@@ -139,7 +138,7 @@ modelRoles:
 - Отдельное хранилище credentials (`grok-build`)
 - Автообновление токена
 - CLI proxy endpoint + нужные CLI headers
-- `/grok-build-usage` — квота Build/Imagine из CLI billing
+- `/usage` — квота Build/Imagine из CLI billing
 - Hybrid catalog: offline seed + live discovery
 - Принудительный refresh: `omp models refresh`
 - Перенос на другие машины
@@ -149,7 +148,7 @@ modelRoles:
 | | Этот extension | Core omp |
 |---|---|---|
 | **Chat path** | `cli-chat-proxy` (Build) | stock `xai-oauth` → `api.x.ai` |
-| **Квота UI** | `/grok-build-usage` сейчас | `/usage` через open PR [#4874](https://github.com/can1357/oh-my-pi/pull/4874) для `xai-oauth` |
+| **Квота UI** | `/usage` сейчас | `/usage` через open PR [#4874](https://github.com/can1357/oh-my-pi/pull/4874) для `xai-oauth` |
 | **Issue** | Build routing [#4945](https://github.com/can1357/oh-my-pi/issues/4945) | нет Grok в usage [#5065](https://github.com/can1357/oh-my-pi/issues/5065) |
 
 Строка **GrokBuild %** в SuperGrok usage ≠ чат уже идёт по Build route. Этот плагин — Build **chat** path.

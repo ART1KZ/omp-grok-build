@@ -2,7 +2,7 @@
  * omp-grok-build — Grok Build provider for Oh My Pi.
  *
  * Chat: cli-chat-proxy.grok.com (Build product path)
- * Usage: patches AuthStorage so stock `/usage` lists grok-build like other providers
+ * Usage: patches AuthStorage so stock `/usage` lists grok-build
  */
 
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
@@ -14,11 +14,7 @@ import {
 } from "./constants";
 import { STATIC_SEED } from "./models";
 import { streamGrokBuildCli } from "./stream";
-import {
-	fetchGrokUsageReport,
-	formatUsageReportText,
-	installGrokUsageIntoAuthStorage,
-} from "./usage";
+import { installGrokUsageIntoAuthStorage } from "./usage";
 import {
 	loginGrokBuildOAuth,
 	refreshGrokBuildOAuthToken,
@@ -29,9 +25,7 @@ function getApiKey(credentials: OAuthCredentials): string {
 	return credentials.access;
 }
 
-function installUsageFromRegistry(modelRegistry: {
-	authStorage?: unknown;
-}): void {
+function installUsageFromRegistry(modelRegistry: { authStorage?: unknown }): void {
 	const authStorage = modelRegistry.authStorage;
 	if (!authStorage || typeof authStorage !== "object") return;
 	installGrokUsageIntoAuthStorage(authStorage);
@@ -67,7 +61,6 @@ export default function ompGrokBuildExtension(pi: ExtensionAPI): void {
 		},
 	});
 
-	// Stock /usage reads AuthStorage.fetchUsageReports — inject Grok Build there.
 	pi.on("session_start", async (_event, ctx) => {
 		installUsageFromRegistry(ctx.modelRegistry);
 	});
@@ -90,35 +83,6 @@ export default function ompGrokBuildExtension(pi: ExtensionAPI): void {
 				].join("\n"),
 				"info",
 			);
-		},
-	});
-
-	// Optional explicit dump (same data /usage shows for grok-build).
-	pi.registerCommand("grok-build-usage", {
-		description: "Show Grok Build quota (same source as /usage)",
-		handler: async (_args, ctx) => {
-			installUsageFromRegistry(ctx.modelRegistry);
-			try {
-				const access = await ctx.modelRegistry.getApiKeyForProvider(PROVIDER_ID);
-				if (!access) {
-					ctx.ui.notify("No Grok Build login. Run /login → Grok Build first.", "error");
-					return;
-				}
-				const report = await fetchGrokUsageReport({
-					provider: PROVIDER_ID,
-					accessToken: access,
-				});
-				if (!report) {
-					ctx.ui.notify("Billing returned no quota fields.", "error");
-					return;
-				}
-				ctx.ui.notify(`${formatUsageReportText(report)}\n\n(also available via /usage)`, "info");
-			} catch (error) {
-				ctx.ui.notify(
-					`Usage failed: ${error instanceof Error ? error.message : String(error)}`,
-					"error",
-				);
-			}
 		},
 	});
 }
