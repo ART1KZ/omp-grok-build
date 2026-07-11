@@ -1,18 +1,8 @@
 /**
- * omp-grok-build
+ * omp-grok-build — Grok Build provider for Oh My Pi.
  *
- * Grok Build provider for Oh My Pi.
- *
- * Product surface matches official Grok Build CLI proxy:
- *   https://cli-chat-proxy.grok.com/v1/responses
- *
- * Install:
- *   omp plugin install github:ART1KZ/omp-grok-build
- *
- * Use:
- *   /login  → Grok Build (CLI proxy)
- *   /model grok-build/grok-4.5
- *   /grok-build-usage
+ * Chat: cli-chat-proxy.grok.com (Build product path)
+ * Usage: patches AuthStorage so stock `/usage` lists grok-build like other providers
  */
 
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
@@ -24,7 +14,11 @@ import {
 } from "./constants";
 import { STATIC_SEED } from "./models";
 import { streamGrokBuildCli } from "./stream";
-import { fetchGrokBillingUsage, formatGrokUsage } from "./usage";
+import {
+	fetchGrokUsageReport,
+	formatUsageReportText,
+	installGrokUsageIntoAuthStorage,
+} from "./usage";
 import {
 	loginGrokBuildOAuth,
 	refreshGrokBuildOAuthToken,
@@ -35,14 +29,12 @@ function getApiKey(credentials: OAuthCredentials): string {
 	return credentials.access;
 }
 
-async function resolveAccessToken(
-	modelRegistry: {
-		getApiKeyForProvider(provider: string, sessionId?: string): Promise<string | undefined>;
-	},
-): Promise<string | undefined> {
-	const fromBuild = await modelRegistry.getApiKeyForProvider(PROVIDER_ID);
-	if (fromBuild) return fromBuild;
-	return modelRegistry.getApiKeyForProvider("xai-oauth");
+function installUsageFromRegistry(modelRegistry: {
+	authStorage?: unknown;
+}): void {
+	const authStorage = modelRegistry.authStorage;
+	if (!authStorage || typeof authStorage !== "object") return;
+	installGrokUsageIntoAuthStorage(authStorage);
 }
 
 export default function ompGrokBuildExtension(pi: ExtensionAPI): void {
@@ -75,44 +67,55 @@ export default function ompGrokBuildExtension(pi: ExtensionAPI): void {
 		},
 	});
 
+	// Stock /usage reads AuthStorage.fetchUsageReports — inject Grok Build there.
+	pi.on("session_start", async (_event, ctx) => {
+		installUsageFromRegistry(ctx.modelRegistry);
+	});
+
 	pi.registerCommand("grok-build-help", {
 		description: "Grok Build provider help",
 		handler: async (_args, ctx) => {
+			installUsageFromRegistry(ctx.modelRegistry);
 			ctx.ui.notify(
 				[
 					"Grok Build provider",
 					"",
-					"  /login             →  Grok Build (CLI proxy)",
-					"  /logout            →  Grok Build",
+					"  /login   → Grok Build (CLI proxy)",
+					"  /logout  → Grok Build",
 					"  /model grok-build/grok-4.5",
-					"  /grok-build-usage  →  Build/Imagine quota",
+					"  /usage   → quota (Grok Build section)",
 					"",
-					"Auth is OAuth only (agent.db, provider id: grok-build).",
-					"Route: cli-chat-proxy.grok.com /v1/responses",
-					"Not:   xai-oauth / api.x.ai (SuperGrok API path)",
+					"Chat:  cli-chat-proxy.grok.com (Build path)",
+					"Not:   xai-oauth / api.x.ai SuperGrok API path",
 				].join("\n"),
 				"info",
 			);
 		},
 	});
 
+	// Optional explicit dump (same data /usage shows for grok-build).
 	pi.registerCommand("grok-build-usage", {
-		description: "Show Grok Build / subscription quota from CLI billing",
+		description: "Show Grok Build quota (same source as /usage)",
 		handler: async (_args, ctx) => {
+			installUsageFromRegistry(ctx.modelRegistry);
 			try {
-				const access = await resolveAccessToken(ctx.modelRegistry);
+				const access = await ctx.modelRegistry.getApiKeyForProvider(PROVIDER_ID);
 				if (!access) {
-					ctx.ui.notify(
-						"No Grok token found. Run /login → Grok Build (CLI proxy) first.",
-						"error",
-					);
+					ctx.ui.notify("No Grok Build login. Run /login → Grok Build first.", "error");
 					return;
 				}
-				const snapshot = await fetchGrokBillingUsage(access);
-				ctx.ui.notify(formatGrokUsage(snapshot), "info");
+				const report = await fetchGrokUsageReport({
+					provider: PROVIDER_ID,
+					accessToken: access,
+				});
+				if (!report) {
+					ctx.ui.notify("Billing returned no quota fields.", "error");
+					return;
+				}
+				ctx.ui.notify(`${formatUsageReportText(report)}\n\n(also available via /usage)`, "info");
 			} catch (error) {
 				ctx.ui.notify(
-					`Usage fetch failed: ${error instanceof Error ? error.message : String(error)}`,
+					`Usage failed: ${error instanceof Error ? error.message : String(error)}`,
 					"error",
 				);
 			}

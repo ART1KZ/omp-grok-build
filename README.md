@@ -106,9 +106,10 @@ Marketplace installs do not load extension modules. Use `omp plugin install`, `o
 | Sign in | `/login` → **Grok Build (CLI proxy)** |
 | Sign out | `/logout` → **Grok Build** |
 | Choose model | `/model grok-build/grok-4.5` |
-| Build quota | `/grok-build-usage` |
+| Quota | `/usage` (Grok Build section) |
 | Help | `/grok-build-help` |
 | Refresh model list | `omp models refresh` |
+
 
 
 
