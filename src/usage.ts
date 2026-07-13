@@ -377,7 +377,6 @@ export function installGrokUsageIntoAuthStorage(
 					});
 					if (report) {
 						extra.push(report);
-						break; // one report per provider is enough for the UI
 					}
 				} catch {
 					// leave gap; UI still shows other providers
