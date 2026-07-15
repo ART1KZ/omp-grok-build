@@ -22,6 +22,26 @@ function billingResponse(creditUsagePercent: number): Response {
 	);
 }
 
+function currentBillingResponse(): Response {
+	return new Response(
+		JSON.stringify({
+			config: {
+				billingPeriodStart: "2026-07-01T00:00:00.000Z",
+				billingPeriodEnd: "2026-07-31T00:00:00.000Z",
+				currentPeriod: {
+					start: "2026-07-01T00:00:00.000Z",
+					end: "2026-07-31T00:00:00.000Z",
+					type: "USAGE_PERIOD_TYPE_MONTHLY",
+				},
+				onDemandCap: { val: 0 },
+				onDemandUsed: { val: 0 },
+				prepaidBalance: { val: 25 },
+			},
+		}),
+		{ status: 200, headers: { "Content-Type": "application/json" } },
+	);
+}
+
 function storageWith(credentials: StoredCredentialLike[]): AuthStorageLike {
 	return {
 		fetchUsageReports: async () => [],
@@ -95,5 +115,33 @@ describe("Grok Build usage integration", () => {
 		expect(reports).toHaveLength(1);
 		expect(reports?.[0]?.metadata?.email).toBe("only@example.test");
 		expect(reports?.[0]?.limits[0]?.amount.used).toBe(37);
+	});
+
+	test("reports a prepaid balance when billing omits subscription percentages", async () => {
+		const storage = storageWith([
+			{
+				id: 1,
+				provider: "grok-build",
+				credential: {
+					type: "oauth",
+					access: "test-token-current-schema",
+					expires: Date.now() + 60_000,
+				},
+			},
+		]);
+
+		installGrokUsageIntoAuthStorage(storage, {
+			fetch: async () => currentBillingResponse(),
+		});
+		const reports = await storage.fetchUsageReports?.();
+		const report = reports?.[0];
+
+		expect(reports).toHaveLength(1);
+		expect(report?.limits).toEqual([
+			expect.objectContaining({
+				label: "Prepaid balance",
+				amount: { remaining: 25, unit: "usd" },
+			}),
+		]);
 	});
 });
