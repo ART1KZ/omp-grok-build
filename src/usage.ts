@@ -22,10 +22,11 @@ export interface GrokBillingConfig {
 	periodStart: string;
 	periodEnd: string;
 	periodType: string;
-	creditUsagePercent: number;
+	creditUsagePercent?: number;
 	products: GrokProductUsage[];
 	onDemandCap?: number;
 	onDemandUsed?: number;
+	prepaidBalance?: number;
 }
 
 /** Minimal UsageReport-compatible shape (mirrors pi-ai). */
@@ -114,7 +115,7 @@ function parseIsoMs(value: string | undefined): number | undefined {
 	return Number.isFinite(ms) ? ms : undefined;
 }
 
-function parseOnDemandVal(value: unknown): number | undefined {
+function parseMoneyVal(value: unknown): number | undefined {
 	if (!isRecord(value)) return undefined;
 	const amount = toFiniteNumber(value.val);
 	return amount !== undefined && amount >= 0 ? amount : undefined;
@@ -141,7 +142,7 @@ export function parseGrokBillingConfig(payload: unknown, nowMs: number = Date.no
 	const periodType = typeof period?.type === "string" ? period.type : "USAGE_PERIOD_TYPE_WEEKLY";
 
 	const creditUsagePercent = toFiniteNumber(config.creditUsagePercent);
-	if (creditUsagePercent === undefined || creditUsagePercent < 0) return undefined;
+	if (creditUsagePercent !== undefined && creditUsagePercent < 0) return undefined;
 
 	const endMs = parseIsoMs(periodEnd);
 	// Soft validation: prefer weekly windows that still look live; still accept if end missing.
@@ -160,14 +161,31 @@ export function parseGrokBillingConfig(payload: unknown, nowMs: number = Date.no
 		}
 	}
 
+	const onDemandCap = parseMoneyVal(config.onDemandCap);
+	const onDemandUsed = parseMoneyVal(config.onDemandUsed);
+	const prepaidBalance = parseMoneyVal(config.prepaidBalance);
+	const hasOnDemandUsage =
+		onDemandCap !== undefined && onDemandCap > 0 && onDemandUsed !== undefined;
+	if (
+		creditUsagePercent === undefined &&
+		products.length === 0 &&
+		!hasOnDemandUsage &&
+		prepaidBalance === undefined
+	) {
+		return undefined;
+	}
+
 	return {
 		periodStart,
 		periodEnd,
 		periodType,
-		creditUsagePercent: Math.min(creditUsagePercent, 100),
+		...(creditUsagePercent !== undefined
+			? { creditUsagePercent: Math.min(creditUsagePercent, 100) }
+			: {}),
 		products,
-		onDemandCap: parseOnDemandVal(config.onDemandCap),
-		onDemandUsed: parseOnDemandVal(config.onDemandUsed),
+		onDemandCap,
+		onDemandUsed,
+		prepaidBalance,
 	};
 }
 
@@ -214,15 +232,17 @@ export function buildGrokUsageReport(args: {
 	};
 
 	const limits: UsageLimitLike[] = [];
-	const total = percentAmount(args.config.creditUsagePercent);
-	limits.push({
-		id: `${args.provider}:credits:1w`,
-		label: "Weekly credits",
-		scope: scopeBase,
-		window,
-		amount: total,
-		status: statusFromFraction(total.usedFraction ?? 0),
-	});
+	if (args.config.creditUsagePercent !== undefined) {
+		const total = percentAmount(args.config.creditUsagePercent);
+		limits.push({
+			id: `${args.provider}:credits:1w`,
+			label: "Weekly credits",
+			scope: scopeBase,
+			window,
+			amount: total,
+			status: statusFromFraction(total.usedFraction ?? 0),
+		});
+	}
 
 	for (const item of args.config.products) {
 		const amount = percentAmount(item.usagePercent);
@@ -269,11 +289,30 @@ export function buildGrokUsageReport(args: {
 		});
 	}
 
+	if (args.config.prepaidBalance !== undefined) {
+		limits.push({
+			id: `${args.provider}:prepaid-balance`,
+			label: "Prepaid balance",
+			scope: {
+				provider: args.provider,
+				accountId: args.accountId,
+				shared: true,
+			},
+			amount: {
+				remaining: args.config.prepaidBalance,
+				unit: "usd",
+			},
+			status: args.config.prepaidBalance > 0 ? "ok" : "exhausted",
+		});
+	}
+
 	return {
 		provider: args.provider,
 		fetchedAt,
 		limits,
-		notes: ["Grok subscription quota (CLI billing). Not paid api.x.ai API-key metering."],
+		notes: [
+			"Grok Build billing from the CLI proxy. Subscription quota appears only when the endpoint provides it.",
+		],
 		metadata: {
 			endpoint: BILLING_URL,
 			source: "cli-chat-proxy-billing",
