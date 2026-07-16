@@ -21,9 +21,10 @@ export const GROK_CLI_VERSION = "0.2.101";
  * Per-request ids (session/conv/req/turn) are added in stream.ts.
  */
 export const GROK_BUILD_HEADERS = {
-	"User-Agent": `grok-shell/${GROK_CLI_VERSION}`,
+	"User-Agent": `grok-shell/${GROK_CLI_VERSION} (${process.platform}; ${process.arch})`,
 	"X-XAI-Token-Auth": "xai-grok-cli",
 	"x-grok-client-identifier": "grok-shell",
+	"x-grok-client-mode": "interactive",
 	"x-grok-client-version": GROK_CLI_VERSION,
 	"x-authenticateresponse": "authenticate-response",
 } as const;

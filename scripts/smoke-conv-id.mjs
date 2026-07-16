@@ -14,7 +14,7 @@ import {
 	resolveConversationId,
 } from "../src/identity.ts";
 import { STATIC_SEED } from "../src/models.ts";
-import { GROK_BUILD_API, GROK_BUILD_HEADERS } from "../src/constants.ts";
+import { GROK_BUILD_API, GROK_BUILD_HEADERS, GROK_CLI_VERSION } from "../src/constants.ts";
 
 const sessionA = "019f4c25-2a4a-7000-b800-434fe0a039cc";
 const sessionB = "019f4ba1-3103-7000-9181-3d3e8f450430";
@@ -97,7 +97,15 @@ if (h1["x-grok-client-identifier"] !== "grok-shell") {
 	console.error("FAIL: client identifier should be grok-shell");
 	process.exit(1);
 }
-
+if (h1["x-grok-client-mode"] !== "interactive") {
+	console.error("FAIL: client mode should be interactive");
+	process.exit(1);
+}
+const expectedUserAgent = `grok-shell/${GROK_CLI_VERSION} (${process.platform}; ${process.arch})`;
+if (h1["User-Agent"] !== expectedUserAgent) {
+	console.error("FAIL: unexpected User-Agent", h1["User-Agent"], "expected", expectedUserAgent);
+	process.exit(1);
+}
 if (countUserTurns([{ role: "user" }, { role: "assistant" }, { role: "user" }]) !== 2) {
 	console.error("FAIL: countUserTurns");
 	process.exit(1);
