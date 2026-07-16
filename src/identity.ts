@@ -1,7 +1,7 @@
 /**
  * Conversation / request identity for Grok Build CLI parity.
  *
- * Official CLI (9router HAR reverse-engineering of grok-pager 0.2.93):
+ * Official CLI (9router HAR reverse-engineering of grok-shell 0.2.93):
  * - main chat: x-grok-session-id === x-grok-conv-id (same stable id)
  * - each HTTP call: new x-grok-req-id (uuid)
  * - x-grok-turn-idx: 1-based user-turn index, monotonic per session

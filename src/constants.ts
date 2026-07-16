@@ -15,15 +15,15 @@ export const GROK_BUILD_BASE_URL = "https://cli-chat-proxy.grok.com/v1";
 export const GROK_CLI_VERSION = "0.2.93";
 
 /**
- * Static fingerprint headers from official grok-pager / grok-shell traffic
+ * Static fingerprint headers from official grok-shell traffic
  * to cli-chat-proxy.grok.com (see decolua/9router grok-cli registry).
  *
  * Per-request ids (session/conv/req/turn) are added in stream.ts.
  */
 export const GROK_BUILD_HEADERS = {
-	"User-Agent": `grok-pager/${GROK_CLI_VERSION} grok-shell/${GROK_CLI_VERSION}`,
+	"User-Agent": `grok-shell/${GROK_CLI_VERSION}`,
 	"X-XAI-Token-Auth": "xai-grok-cli",
-	"x-grok-client-identifier": "grok-pager",
+	"x-grok-client-identifier": "grok-shell",
 	"x-grok-client-version": GROK_CLI_VERSION,
 	"x-authenticateresponse": "authenticate-response",
 } as const;

@@ -93,8 +93,8 @@ if (h1["X-XAI-Token-Auth"] !== "xai-grok-cli") {
 	console.error("FAIL: missing token auth");
 	process.exit(1);
 }
-if (h1["x-grok-client-identifier"] !== "grok-pager") {
-	console.error("FAIL: client identifier should be grok-pager");
+if (h1["x-grok-client-identifier"] !== "grok-shell") {
+	console.error("FAIL: client identifier should be grok-shell");
 	process.exit(1);
 }
 
@@ -112,4 +112,4 @@ if (!STATIC_SEED.every(m => m.api === GROK_BUILD_API)) {
 }
 
 console.log("PASS");
-console.log("main chat: session=conv stable; req changes; turn grows; no recap- prefix");
+console.log("main chat: session=conv stable; req changes; turn grows; no recap- prefix; using grok-shell client identifier");
