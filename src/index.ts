@@ -14,7 +14,11 @@ import {
 } from "./constants";
 import { STATIC_SEED } from "./models";
 import { streamGrokBuildCli } from "./stream";
-import { installGrokUsageIntoAuthStorage } from "./usage";
+import {
+	backfillGrokOAuthIdentity,
+	installGrokUsageIntoAuthStorage,
+	type AuthStorageLike,
+} from "./usage";
 import {
 	loginGrokBuildOAuth,
 	refreshGrokBuildOAuthToken,
@@ -29,6 +33,9 @@ function installUsageFromRegistry(modelRegistry: { authStorage?: unknown }): voi
 	const authStorage = modelRegistry.authStorage;
 	if (!authStorage || typeof authStorage !== "object") return;
 	installGrokUsageIntoAuthStorage(authStorage);
+	// Fire-and-forget identity backfill for existing oauth rows missing email/accountId.
+	// Soft-fails inside; never blocks session_start.
+	void backfillGrokOAuthIdentity(authStorage as AuthStorageLike);
 }
 
 export default function ompGrokBuildExtension(pi: ExtensionAPI): void {
@@ -56,7 +63,10 @@ export default function ompGrokBuildExtension(pi: ExtensionAPI): void {
 			name: "Grok Build (CLI proxy)",
 			login: async callbacks => loginGrokBuildOAuth(callbacks),
 			refreshToken: async credentials =>
-				refreshGrokBuildOAuthToken(credentials.refresh),
+				refreshGrokBuildOAuthToken(credentials.refresh, undefined, {
+					email: credentials.email,
+					accountId: credentials.accountId,
+				}),
 			getApiKey,
 		},
 	});

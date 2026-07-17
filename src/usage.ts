@@ -7,11 +7,14 @@
  */
 
 import { GROK_BUILD_HEADERS } from "./constants";
+import { enrichOAuthIdentity } from "./xai-device-oauth";
 
 const BILLING_URL = "https://cli-chat-proxy.grok.com/v1/billing?format=credits";
 const PROVIDER_ID = "grok-build";
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const INSTALLED = new WeakSet<object>();
+/** One identity-backfill attempt per AuthStorage instance (session_start). */
+const IDENTITY_BACKFILL_ATTEMPTED = new WeakSet<object>();
 
 export interface GrokProductUsage {
 	product: string;
@@ -72,6 +75,15 @@ export interface AuthStorageLike {
 	}) => Promise<UsageReportLike[] | null>;
 	usageProviderFor?: (provider: string) => unknown;
 	listStoredCredentials?: (provider?: string) => StoredCredentialLike[];
+	/** Public AuthStorage.upsertCredential — identity-key match (safe when email/accountId already present). */
+	upsertCredential?: (provider: string, credential: StoredCredentialLike["credential"] & { type: "oauth" }) => unknown;
+	/** Public AuthStorage.set — replaces all credentials for the provider (must pass every row). */
+	set?: (
+		provider: string,
+		credential:
+			| (StoredCredentialLike["credential"] & { type?: string })
+			| Array<StoredCredentialLike["credential"] & { type?: string }>,
+	) => void | Promise<void>;
 	getAll?: () => Record<string, unknown>;
 }
 
@@ -94,6 +106,12 @@ export interface InstallUsageOptions {
 	fetch?: typeof fetch;
 	/** Extra providers to backfill if core has no UsageProvider yet (e.g. xai-oauth). */
 	providers?: string[];
+}
+
+export interface IdentityBackfillOptions {
+	fetch?: typeof fetch;
+	provider?: string;
+	nowMs?: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -362,6 +380,232 @@ function oauthStillValid(credential: StoredCredentialLike["credential"], nowMs: 
 	const expires = credential.expires ?? credential.expiresAt;
 	if (expires === undefined) return true;
 	return expires > nowMs + 30_000;
+}
+
+function missingIdentity(credential: StoredCredentialLike["credential"]): boolean {
+	const email = typeof credential.email === "string" ? credential.email.trim() : "";
+	const accountId = typeof credential.accountId === "string" ? credential.accountId.trim() : "";
+	return !email || !accountId;
+}
+
+function stripLegacyOAuthAliases(
+	credential: StoredCredentialLike["credential"] & { type: "oauth" },
+): StoredCredentialLike["credential"] & { type: "oauth" } {
+	const next = { ...credential };
+	if ("accessToken" in next) {
+		delete next.accessToken;
+	}
+	if ("expiresAt" in next) {
+		delete next.expiresAt;
+	}
+	return next;
+}
+
+function toOAuthPersistShape(
+	credential: StoredCredentialLike["credential"],
+	enriched: { access: string; refresh: string; expires: number; email?: string; accountId?: string },
+): StoredCredentialLike["credential"] & { type: "oauth" } {
+	const next: StoredCredentialLike["credential"] & { type: "oauth" } = {
+		...credential,
+		type: "oauth",
+		access: enriched.access,
+		refresh: enriched.refresh,
+		expires: enriched.expires,
+	};
+	if (enriched.email) next.email = enriched.email;
+	if (enriched.accountId) next.accountId = enriched.accountId;
+	return stripLegacyOAuthAliases(next);
+}
+
+function identityGained(
+	before: StoredCredentialLike["credential"],
+	after: { email?: string; accountId?: string },
+): boolean {
+	const beforeEmail = typeof before.email === "string" ? before.email.trim() : "";
+	const beforeAccount = typeof before.accountId === "string" ? before.accountId.trim() : "";
+	const afterEmail = typeof after.email === "string" ? after.email.trim() : "";
+	const afterAccount = typeof after.accountId === "string" ? after.accountId.trim() : "";
+	const emailGained = Boolean(afterEmail) && afterEmail !== beforeEmail;
+	const accountGained = Boolean(afterAccount) && afterAccount !== beforeAccount;
+	return emailGained || accountGained;
+}
+
+/**
+ * One-shot session_start backfill for existing grok-build OAuth rows that only
+ * have {access,refresh,expires}. Uses AuthStorage public methods only.
+ *
+ * Persistence strategy (inspected against pi-ai AuthStorage):
+ * - Prefer `set(provider, allCredentials)` when available: rewrites the full
+ *   provider set (oauth + any api_key rows) so identity-less oauth rows are
+ *   updated without wiping siblings. Required because `upsertCredential` cannot
+ *   match rows whose identity_key is still null (it would INSERT duplicates).
+ * - Else use `upsertCredential` only for rows that already carry some identity
+ *   (partial email/accountId upgrade). Pure identity-less rows are skipped —
+ *   re-login or natural token refresh is needed.
+ * - If neither method exists, skip entirely.
+ *
+ * Soft-fails entirely — never throws out of session_start.
+ * Guarded by WeakSet: at most one attempt per authStorage instance.
+ */
+export async function backfillGrokOAuthIdentity(
+	authStorage: AuthStorageLike,
+	options: IdentityBackfillOptions = {},
+): Promise<void> {
+	try {
+		const key = authStorage as object;
+		if (IDENTITY_BACKFILL_ATTEMPTED.has(key)) return;
+		IDENTITY_BACKFILL_ATTEMPTED.add(key);
+
+		const anyAuth = authStorage as AuthStorageLike;
+		const listFn = anyAuth.listStoredCredentials;
+		const upsertFn = anyAuth.upsertCredential;
+		const setFn = anyAuth.set;
+		if (typeof listFn !== "function") return;
+		if (typeof upsertFn !== "function" && typeof setFn !== "function") {
+			// No safe persistence path — re-login or token refresh must enrich.
+			return;
+		}
+
+		const provider = options.provider ?? PROVIDER_ID;
+		const fetchImpl = options.fetch ?? globalThis.fetch;
+		const nowMs = options.nowMs ?? Date.now();
+
+		const rows = listFn.call(authStorage, provider) ?? [];
+		if (!Array.isArray(rows) || rows.length === 0) return;
+
+		// Full provider snapshot so set() never drops sibling accounts / api keys.
+		const snapshot = rows.map(row => ({
+			id: row.id,
+			provider: row.provider,
+			credential: { ...row.credential },
+		}));
+
+		const enrichedIds = new Set<number | undefined>();
+		let mutated = false;
+
+		for (const row of snapshot) {
+			const credential = row.credential;
+			if (credential.type !== undefined && credential.type !== "oauth") continue;
+			if (!missingIdentity(credential)) continue;
+
+			const access = oauthAccess(credential);
+			if (!access || !oauthStillValid(credential, nowMs)) continue;
+
+			const refresh =
+				typeof credential.refresh === "string" && credential.refresh.trim()
+					? credential.refresh.trim()
+					: undefined;
+			if (!refresh) continue;
+
+			const expires = credential.expires ?? credential.expiresAt;
+			if (typeof expires !== "number" || !Number.isFinite(expires)) continue;
+
+			let enriched;
+			try {
+				enriched = await enrichOAuthIdentity(
+					{
+						access,
+						refresh,
+						expires,
+						email: credential.email,
+						accountId: credential.accountId,
+					},
+					{
+						fetchImpl,
+						previous: {
+							email: credential.email,
+							accountId: credential.accountId,
+						},
+					},
+				);
+			} catch {
+				continue;
+			}
+
+			if (!identityGained(credential, enriched)) continue;
+
+			row.credential = toOAuthPersistShape(credential, enriched);
+			enrichedIds.add(row.id);
+			mutated = true;
+		}
+
+		if (!mutated) return;
+
+		// Safest multi-account path: rewrite ALL credentials for the provider.
+		if (typeof setFn === "function") {
+			const allCredentials = snapshot
+				.map(row => {
+					const c = row.credential;
+					if (c.type === "api_key") return { ...c };
+					if (c.type !== undefined && c.type !== "oauth") return { ...c };
+
+					const access = oauthAccess(c);
+					const refresh =
+						typeof c.refresh === "string" && c.refresh.trim() ? c.refresh.trim() : undefined;
+					const expires = c.expires ?? c.expiresAt;
+					if (!access || !refresh || typeof expires !== "number") return null;
+
+					return toOAuthPersistShape(c, {
+						access,
+						refresh,
+						expires,
+						email: c.email,
+						accountId: c.accountId,
+					});
+				})
+				.filter((c): c is NonNullable<typeof c> => c !== null);
+
+			if (allCredentials.length === 0) return;
+			await setFn.call(authStorage, provider, allCredentials);
+			return;
+		}
+
+		// upsert-only fallback: only rows that already had some identity can be
+		// matched by identity_key. Identity-less rows would INSERT duplicates —
+		// skip those; re-login / natural refresh is required.
+		if (typeof upsertFn === "function") {
+			for (const row of snapshot) {
+				if (!enrichedIds.has(row.id)) continue;
+				const c = row.credential;
+				// After enrichment both fields may be set, but the *stored* row
+				// still has null identity_key when it started identity-less.
+				// Without set(), we cannot safely target that row.
+				// Heuristic: if the original row id is unknown, skip.
+				// We only upsert when the enriched credential has identity AND
+				// the pre-enrichment credential already had at least one field
+				// (partial upgrade) — those rows already have identity_key.
+				// Snapshot already holds post-enrichment data; recover "had prior"
+				// via: not both missing from the *original* list.
+				const original = rows.find(r => r.id === row.id)?.credential;
+				const hadPriorIdentity =
+					original !== undefined &&
+					((typeof original.email === "string" && original.email.trim() !== "") ||
+						(typeof original.accountId === "string" && original.accountId.trim() !== ""));
+				if (!hadPriorIdentity) continue;
+
+				const access = oauthAccess(c);
+				const refresh =
+					typeof c.refresh === "string" && c.refresh.trim() ? c.refresh.trim() : undefined;
+				const expires = c.expires ?? c.expiresAt;
+				if (!access || !refresh || typeof expires !== "number") continue;
+
+				const payload = toOAuthPersistShape(c, {
+					access,
+					refresh,
+					expires,
+					email: c.email,
+					accountId: c.accountId,
+				});
+				try {
+					upsertFn.call(authStorage, provider, payload);
+				} catch {
+					// soft-fail per row
+				}
+			}
+		}
+	} catch {
+		// never throw out of session_start
+	}
 }
 
 /**

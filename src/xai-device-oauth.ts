@@ -14,6 +14,8 @@ export interface OAuthCredentials {
 	access: string;
 	refresh: string;
 	expires: number;
+	accountId?: string;
+	email?: string;
 }
 
 export interface OAuthAuthInfo {
@@ -33,6 +35,7 @@ export interface OAuthLoginCallbacks {
 const XAI_OAUTH_ISSUER = "https://auth.x.ai";
 const XAI_OAUTH_DISCOVERY_URL = `${XAI_OAUTH_ISSUER}/.well-known/openid-configuration`;
 const XAI_OAUTH_DEVICE_CODE_URL = `${XAI_OAUTH_ISSUER}/oauth2/device/code`;
+const XAI_OAUTH_USERINFO_URL = `${XAI_OAUTH_ISSUER}/oauth2/userinfo`;
 /** Same public client used by Grok Build CLI and omp xai-oauth. */
 export const XAI_OAUTH_CLIENT_ID = "b1a00492-073a-47ea-816f-4c329264a828";
 /**
@@ -45,11 +48,13 @@ export const XAI_OAUTH_SCOPE =
 const ACCESS_TOKEN_CLIENT_SKEW_MS = 5 * 60 * 1000;
 const DISCOVERY_TIMEOUT_MS = 15_000;
 const TOKEN_REQUEST_TIMEOUT_MS = 20_000;
+const USERINFO_TIMEOUT_MS = 10_000;
 const DEFAULT_POLL_INTERVAL_SECONDS = 5;
 const DEFAULT_DEVICE_EXPIRES_SECONDS = 15 * 60;
 
 interface XAIOAuthDiscovery {
 	token_endpoint: string;
+	userinfo_endpoint?: string;
 }
 
 interface XAIDeviceAuthorization {
@@ -60,10 +65,15 @@ interface XAIDeviceAuthorization {
 	intervalSeconds: number;
 }
 
+interface ParsedTokenResponse {
+	credentials: OAuthCredentials;
+	idToken?: string;
+}
+
 type DevicePollStatus =
 	| { status: "pending" }
 	| { status: "slow_down" }
-	| { status: "complete"; value: OAuthCredentials };
+	| { status: "complete"; value: ParsedTokenResponse };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null;
@@ -108,11 +118,117 @@ export function validateXAIEndpoint(url: string, field: string): string {
 	return url;
 }
 
+/** Decode JWT middle segment without signature verification. */
+export function decodeJwtPayload(token: string): Record<string, unknown> | undefined {
+	if (typeof token !== "string") return undefined;
+	const parts = token.split(".");
+	if (parts.length < 2) return undefined;
+	const segment = parts[1]?.trim();
+	if (!segment) return undefined;
+	try {
+		const padded = segment.replace(/-/g, "+").replace(/_/g, "/");
+		const padLen = (4 - (padded.length % 4)) % 4;
+		const b64 = padded + "=".repeat(padLen);
+		const json =
+			typeof atob === "function"
+				? atob(b64)
+				: Buffer.from(b64, "base64").toString("utf8");
+		const payload: unknown = JSON.parse(json);
+		return isRecord(payload) ? payload : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/** Prefer principal_id, then sub, when non-empty strings. */
+export function resolveAccountIdFromAccess(access: string): string | undefined {
+	const payload = decodeJwtPayload(access);
+	if (!payload) return undefined;
+	const principal =
+		typeof payload.principal_id === "string" ? payload.principal_id.trim() : "";
+	if (principal) return principal;
+	const sub = typeof payload.sub === "string" ? payload.sub.trim() : "";
+	return sub || undefined;
+}
+
+/** Soft-fail userinfo lookup for email claim. */
+export async function fetchXAIUserEmail(
+	access: string,
+	fetchImpl: typeof fetch = fetch,
+	signal?: AbortSignal,
+	userinfoEndpoint: string = XAI_OAUTH_USERINFO_URL,
+): Promise<string | undefined> {
+	if (typeof access !== "string" || !access.trim()) return undefined;
+	let endpoint: string;
+	try {
+		endpoint = validateXAIEndpoint(userinfoEndpoint, "userinfo_endpoint");
+	} catch {
+		return undefined;
+	}
+	try {
+		const timeoutSignal = AbortSignal.timeout(USERINFO_TIMEOUT_MS);
+		const response = await fetchImpl(endpoint, {
+			method: "GET",
+			headers: {
+				Authorization: `Bearer ${access.trim()}`,
+				Accept: "application/json",
+			},
+			signal: signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal,
+		});
+		if (response.status !== 200) return undefined;
+		const payload: unknown = await response.json().catch(() => null);
+		if (!isRecord(payload)) return undefined;
+		const email = typeof payload.email === "string" ? payload.email.trim() : "";
+		return email || undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+export async function enrichOAuthIdentity(
+	creds: OAuthCredentials,
+	opts: {
+		fetchImpl?: typeof fetch;
+		signal?: AbortSignal;
+		idToken?: string;
+		previous?: Pick<OAuthCredentials, "email" | "accountId">;
+		userinfoEndpoint?: string;
+	} = {},
+): Promise<OAuthCredentials> {
+	const accountId =
+		resolveAccountIdFromAccess(creds.access) ?? opts.previous?.accountId;
+
+	let email: string | undefined;
+	if (opts.idToken) {
+		const idPayload = decodeJwtPayload(opts.idToken);
+		const idEmail =
+			idPayload && typeof idPayload.email === "string" ? idPayload.email.trim() : "";
+		email = idEmail || undefined;
+	}
+	if (!email) {
+		email = await fetchXAIUserEmail(
+			creds.access,
+			opts.fetchImpl ?? fetch,
+			opts.signal,
+			opts.userinfoEndpoint ?? XAI_OAUTH_USERINFO_URL,
+		);
+	}
+	if (!email) {
+		email = opts.previous?.email;
+	}
+
+	return {
+		...creds,
+		...(accountId ? { accountId } : {}),
+		...(email ? { email } : {}),
+	};
+}
+
 function parseXAITokenResponse(
 	payload: unknown,
 	context: string,
 	fallbackRefresh?: string,
-): OAuthCredentials {
+): ParsedTokenResponse {
 	if (!isRecord(payload)) {
 		throw new Error(`${context} was not a JSON object`);
 	}
@@ -133,7 +249,14 @@ function parseXAITokenResponse(
 			? payload.expires_in
 			: 3600;
 	const expires = Date.now() + Math.max(0, expiresIn) * 1000 - ACCESS_TOKEN_CLIENT_SKEW_MS;
-	return { access, refresh, expires };
+	const idToken =
+		typeof payload.id_token === "string" && payload.id_token.trim()
+			? payload.id_token.trim()
+			: undefined;
+	return {
+		credentials: { access, refresh, expires },
+		...(idToken ? { idToken } : {}),
+	};
 }
 
 async function xaiOAuthDiscovery(
@@ -164,7 +287,20 @@ async function xaiOAuthDiscovery(
 	if (!tokenEndpoint) {
 		throw new Error("xAI OIDC discovery response was missing token_endpoint");
 	}
-	return { token_endpoint: validateXAIEndpoint(tokenEndpoint, "token_endpoint") };
+	const userinfoRaw =
+		typeof payload.userinfo_endpoint === "string" ? payload.userinfo_endpoint.trim() : "";
+	let userinfo_endpoint: string | undefined;
+	if (userinfoRaw) {
+		try {
+			userinfo_endpoint = validateXAIEndpoint(userinfoRaw, "userinfo_endpoint");
+		} catch {
+			// ignore invalid discovery userinfo; fall back later
+		}
+	}
+	return {
+		token_endpoint: validateXAIEndpoint(tokenEndpoint, "token_endpoint"),
+		...(userinfo_endpoint ? { userinfo_endpoint } : {}),
+	};
 }
 
 async function requestXAIDeviceAuthorization(
@@ -309,7 +445,14 @@ export async function loginGrokBuildOAuth(
 			fetchImpl,
 			ctrl.signal,
 		);
-		if (result.status === "complete") return result.value;
+		if (result.status === "complete") {
+			return enrichOAuthIdentity(result.value.credentials, {
+				fetchImpl,
+				signal: ctrl.signal,
+				idToken: result.value.idToken,
+				userinfoEndpoint: discovery.userinfo_endpoint,
+			});
+		}
 		if (result.status === "slow_down") {
 			intervalMs += 1000;
 		}
@@ -322,6 +465,7 @@ export async function loginGrokBuildOAuth(
 export async function refreshGrokBuildOAuthToken(
 	refreshToken: string,
 	fetchOverride?: typeof fetch,
+	previous?: Pick<OAuthCredentials, "email" | "accountId">,
 ): Promise<OAuthCredentials> {
 	const fetchImpl = fetchOverride ?? fetch;
 	if (typeof refreshToken !== "string" || !refreshToken.trim()) {
@@ -354,5 +498,11 @@ export async function refreshGrokBuildOAuthToken(
 		);
 	}
 	const payload: unknown = await response.json();
-	return parseXAITokenResponse(payload, "xAI token refresh response", refreshToken);
+	const parsed = parseXAITokenResponse(payload, "xAI token refresh response", refreshToken);
+	return enrichOAuthIdentity(parsed.credentials, {
+		fetchImpl,
+		idToken: parsed.idToken,
+		previous,
+		userinfoEndpoint: discovery.userinfo_endpoint,
+	});
 }
