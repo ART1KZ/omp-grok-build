@@ -170,6 +170,19 @@ Seeing a **GrokBuild %** line under SuperGrok usage is not the same as chat alre
 
 The list is not permanent after first login. It refreshes on cache expiry or manual refresh, and can change with account tier.
 
+Static seed (CLI proxy catalog from `grok models`, plus the earlier coding SKUs):
+
+| Selector | Name |
+|---|---|
+| `grok-build/grok-4.7` | Grok 4.7 |
+| `grok-build/grok-4.7-build-fast` | Grok 4.7 Fast |
+| `grok-build/grok-4.6` | Grok 4.6 |
+| `grok-build/grok-4.5` | Grok 4.5 |
+| `grok-build/grok-build` | Grok Build coding SKU |
+| `grok-build/grok-composer-2.5-fast` | Composer 2.5 Fast |
+
+`grok models` lists the fast SKU as `grok-4.7-build-fast` (display name Grok 4.7 Fast).
+
 ---
 
 ## Auth

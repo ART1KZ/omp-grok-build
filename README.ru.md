@@ -166,6 +166,19 @@ modelRoles:
 
 Список не фиксируется навсегда после первого входа. Он обновляется по TTL cache или вручную и может зависеть от tier аккаунта.
 
+Static seed (каталог `grok models` плюс прежние coding SKU):
+
+| Селектор | Имя |
+|---|---|
+| `grok-build/grok-4.7` | Grok 4.7 |
+| `grok-build/grok-4.7-build-fast` | Grok 4.7 Fast |
+| `grok-build/grok-4.6` | Grok 4.6 |
+| `grok-build/grok-4.5` | Grok 4.5 |
+| `grok-build/grok-build` | Grok Build coding SKU |
+| `grok-build/grok-composer-2.5-fast` | Composer 2.5 Fast |
+
+`grok models` отдаёт быстрый SKU как `grok-4.7-build-fast` (имя в пикере — Grok 4.7 Fast).
+
 ---
 
 ## Auth

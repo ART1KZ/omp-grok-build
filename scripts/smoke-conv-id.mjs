@@ -111,6 +111,24 @@ if (countUserTurns([{ role: "user" }, { role: "assistant" }, { role: "user" }]) 
 	process.exit(1);
 }
 
+const EFFORTS = ["low", "medium", "high", "xhigh"];
+for (const id of ["grok-4.7", "grok-4.7-build-fast", "grok-4.6", "grok-4.5"]) {
+	const model = STATIC_SEED.find(m => m.id === id);
+	if (!model) {
+		console.error("FAIL: missing seed model", id);
+		process.exit(1);
+	}
+	const efforts = model.thinking?.efforts ?? [];
+	if (efforts.length !== EFFORTS.length || EFFORTS.some((effort, index) => efforts[index] !== effort)) {
+		console.error("FAIL: effort dial", id, efforts);
+		process.exit(1);
+	}
+	if (model.compat?.reasoningEffortMap) {
+		console.error("FAIL: effort must be sent unchanged", id);
+		process.exit(1);
+	}
+}
+
 if (!STATIC_SEED.every(m => m.api === GROK_BUILD_API)) {
 	console.error(
 		"FAIL: seed api",
